@@ -21,6 +21,7 @@ const MEETINGS = 'roloe-meetings';
 const PASSAGES = 'roloe-passages';
 const SAMPLE = 'roloe-test-meetings-sample';
 const MEETINGS_MAPPING = {
+  dynamic: 'strict',
   properties: {
     meeting_id: { type: 'keyword' },
     kind: { type: 'keyword' },
