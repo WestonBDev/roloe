@@ -1,0 +1,197 @@
+// Elasticsearch store. One index of passages with owner_id and encounter_id.
+// At a tap, both cards are copied into the encounter and an API key is minted with the
+// elastic user's credentials. On a trial/Enterprise license the key's role descriptor carries
+// document-level security (query: term encounter_id), so the key itself can't reach anything
+// else. On Basic, DLS is refused; the key is read-only on the index and the coordinator's
+// encounter_id filter (applied on every read in both modes) carries scope.
+
+const LICENSED = new Set(['trial', 'enterprise', 'platinum']);
+const SEMANTIC_CANDIDATES = ['.elser-2-elastic', '.elser-2-elasticsearch', '.multilingual-e5-small-elasticsearch'];
+
+export function elasticStore({ esUrl, esUser, esPassword, esIndex }) {
+  const base = esUrl.replace(/\/$/, '');
+  const index = esIndex;
+  const basic = 'Basic ' + Buffer.from(`${esUser}:${esPassword}`).toString('base64');
+  const keys = new Map(); // keyId -> { encoded, encounter_id, valid }  (memory only, never persisted)
+  const info = { store: 'elasticsearch', license: 'unknown', scope: 'coordinator filter', rrf: 'coordinator', semantic: false, inference_id: null };
+
+  async function es(method, path, body, { auth = basic, ndjson = false, allow = [] } = {}) {
+    const res = await fetch(base + path, {
+      method,
+      headers: { authorization: auth, 'content-type': ndjson ? 'application/x-ndjson' : 'application/json' },
+      body: body === undefined ? undefined : ndjson ? body : JSON.stringify(body),
+      signal: AbortSignal.timeout(30000),
+    });
+    const text = await res.text();
+    let json; try { json = JSON.parse(text); } catch { json = { raw: text }; }
+    if (!res.ok && !allow.includes(res.status)) {
+      const e = new Error(`elasticsearch ${res.status} ${json?.error?.type || ''}`.trim());
+      e.code = json?.error?.type || `es_${res.status}`;
+      e.status = res.status;
+      throw e;
+    }
+    return { status: res.status, json };
+  }
+
+  const keyAuth = (keyId) => {
+    const k = keys.get(keyId);
+    if (!k || !k.valid) { const e = new Error('Key is not valid'); e.code = 'key_invalid'; throw e; }
+    return k;
+  };
+  const docOf = (h) => ({ ...h._source, _score: h._score });
+  const strip = ({ _score, ...d }) => d;
+  const scoped = (enc, must = [], filter = []) => ({ bool: { must, filter: [{ term: { encounter_id: enc } }, ...filter] } });
+
+  async function bulkIndex(docs) {
+    if (!docs.length) return 0;
+    const lines = [];
+    for (const d of docs) {
+      lines.push(JSON.stringify({ index: { _index: index, _id: `${d.encounter_id}:${d.passage_id}` } }));
+      lines.push(JSON.stringify(d));
+    }
+    const { json } = await es('POST', '/_bulk?refresh=true', lines.join('\n') + '\n', { ndjson: true });
+    if (json.errors) {
+      const first = json.items.find((i) => i.index?.error);
+      const e = new Error(`bulk error ${first?.index?.error?.type}`); e.code = 'bulk_error'; throw e;
+    }
+    return docs.length;
+  }
+
+  async function searchAs(keyId, body) {
+    const k = keyAuth(keyId);
+    const { json } = await es('POST', `/${index}/_search`, body, { auth: `ApiKey ${k.encoded}` });
+    return json.hits.hits.map(docOf);
+  }
+
+  return {
+    mode: 'elasticsearch',
+    describe: () => ({ ...info }),
+    async init() {
+      const lic = await es('GET', '/_license');
+      info.license = lic.json.license?.type || 'unknown';
+      const licensed = LICENSED.has(info.license) && lic.json.license?.status === 'active';
+      info.scope = licensed ? 'document-level security key' : 'coordinator filter (Basic license refuses DLS)';
+      info.rrf = licensed ? 'elasticsearch' : 'coordinator';
+      const exists = await es('HEAD', `/${index}`, undefined, { allow: [404] });
+      if (exists.status === 404) {
+        if (licensed && process.env.ROLOE_SEMANTIC !== 'off') {
+          const inf = await es('GET', '/_inference/_all', undefined, { allow: [400, 403, 404] });
+          const ids = (inf.json.endpoints || []).map((e) => e.inference_id);
+          info.inference_id = SEMANTIC_CANDIDATES.find((c) => ids.includes(c)) || null;
+        }
+        const props = {
+          passage_id: { type: 'keyword' }, owner_id: { type: 'keyword' }, owner_name: { type: 'keyword' },
+          encounter_id: { type: 'keyword' }, kind: { type: 'keyword' }, speaker: { type: 'keyword' },
+          source: { type: 'keyword' }, locator: { type: 'keyword' }, via: { type: 'keyword' },
+          ts: { type: 'date' }, text: { type: 'text' },
+        };
+        if (info.inference_id) {
+          props.text = { type: 'text', copy_to: 'text_semantic' };
+          props.text_semantic = { type: 'semantic_text', inference_id: info.inference_id };
+        }
+        await es('PUT', `/${index}`, { settings: { number_of_shards: 1, number_of_replicas: 0, refresh_interval: '1s' }, mappings: { properties: props } }, { allow: [400] });
+      } else {
+        const m = await es('GET', `/${index}/_mapping`);
+        const sem = Object.values(m.json)[0]?.mappings?.properties?.text_semantic;
+        info.inference_id = sem?.inference_id || null;
+      }
+      info.semantic = Boolean(info.inference_id);
+    },
+    async replaceCard(owner, ownerName, passages) {
+      await es('POST', `/${index}/_delete_by_query?refresh=true&conflicts=proceed`, { query: { term: { encounter_id: `card:${owner}` } } });
+      return bulkIndex(passages.map((p) => ({ ...p, owner_id: owner, owner_name: ownerName, encounter_id: `card:${owner}` })));
+    },
+    async listCard(owner) {
+      const { json } = await es('POST', `/${index}/_search`, { size: 1000, query: { term: { encounter_id: `card:${owner}` } } });
+      return json.hits.hits.map((h) => h._source);
+    },
+    async removeFromCard(owner, passageId) {
+      const { json } = await es('POST', `/${index}/_delete_by_query?refresh=true&conflicts=proceed`, {
+        query: { bool: { filter: [{ term: { encounter_id: `card:${owner}` } }, { term: { passage_id: passageId } }] } },
+      });
+      return json.deleted || 0;
+    },
+    // _reindex can't write into the index it reads from, so search + bulk.
+    async copyCardsToEncounter(enc, owners) {
+      const { json } = await es('POST', `/${index}/_search`, { size: 2000, query: { terms: { encounter_id: owners.map((o) => `card:${o}`) } } });
+      return bulkIndex(json.hits.hits.map((h) => ({ ...h._source, encounter_id: enc })));
+    },
+    async addToEncounter(enc, owner, ownerName, passages) {
+      return bulkIndex(passages.map((p) => ({ ...p, owner_id: owner, owner_name: ownerName, encounter_id: enc })));
+    },
+    // Minted with the elastic user's credentials: a key created by another API key gets no privileges.
+    async createEncounterKey(enc) {
+      const priv = { names: [index], privileges: ['read'] };
+      if (info.scope.startsWith('document-level')) priv.query = { term: { encounter_id: enc } };
+      const { json } = await es('POST', '/_security/api_key', {
+        name: `roloe-${enc}`, expiration: '1d',
+        role_descriptors: { roloe_encounter: { cluster: [], indices: [priv] } },
+        metadata: { roloe_encounter: enc },
+      });
+      keys.set(json.id, { encoded: json.encoded, encounter_id: enc, valid: true });
+      return { id: json.id };
+    },
+    async invalidateKey(id) {
+      const k = keys.get(id);
+      if (k) k.valid = false;
+      await es('DELETE', '/_security/api_key', { ids: [id] }, { allow: [404] });
+    },
+    async get(keyId, passageId) {
+      const k = keyAuth(keyId);
+      const hits = await searchAs(keyId, { size: 1, query: scoped(k.encounter_id, [], [{ term: { passage_id: passageId } }]) });
+      return hits[0] ? strip(hits[0]) : null;
+    },
+    async list(keyId, owner) {
+      const k = keyAuth(keyId);
+      const hits = await searchAs(keyId, { size: 2000, query: scoped(k.encounter_id, [], owner ? [{ term: { owner_id: owner } }] : []) });
+      return hits.map(strip);
+    },
+    async count(keyId) {
+      try {
+        const k = keyAuth(keyId);
+        const { json } = await es('POST', `/${index}/_count`, { query: scoped(k.encounter_id) }, { auth: `ApiKey ${k.encoded}` });
+        return json.count;
+      } catch { return 0; }
+    },
+    // The raw proof for DLS: no filter in the query at all. On a licensed cluster this still
+    // returns only the key's encounter.
+    async countUnfiltered(keyId) {
+      const k = keyAuth(keyId);
+      const { json } = await es('POST', `/${index}/_count`, { query: { match_all: {} } }, { auth: `ApiKey ${k.encoded}` });
+      return json.count;
+    },
+    async search(keyId, query, { owner, k = 5 } = {}) {
+      return (await this.msearch(keyId, [query], { owner, k }))[0];
+    },
+    async msearch(keyId, queries, { owner, k = 5, hybrid = false } = {}) {
+      const key = keyAuth(keyId);
+      if (!queries.length) return [];
+      const filter = owner ? [{ term: { owner_id: owner } }] : [];
+      const lines = [];
+      for (const q of queries) {
+        lines.push('{}');
+        const lexical = { match: { text: { query: String(q).slice(0, 2000) } } };
+        if (hybrid && info.semantic && info.rrf === 'elasticsearch') {
+          const f = [{ term: { encounter_id: key.encounter_id } }, ...filter];
+          lines.push(JSON.stringify({ size: k, _source: { excludes: ['text_semantic'] }, retriever: { rrf: { rank_window_size: 20, rank_constant: 60, retrievers: [
+            { standard: { query: { bool: { must: [lexical], filter: f } } } },
+            { standard: { query: { bool: { must: [{ semantic: { field: 'text_semantic', query: String(q).slice(0, 2000) } }], filter: f } } } },
+          ] } } }));
+        } else {
+          lines.push(JSON.stringify({ size: k, _source: { excludes: ['text_semantic'] }, query: scoped(key.encounter_id, [lexical], filter) }));
+        }
+      }
+      const { json } = await es('POST', `/${index}/_msearch`, lines.join('\n') + '\n', { auth: `ApiKey ${key.encoded}`, ndjson: true });
+      return json.responses.map((r) => (r.hits?.hits || []).map(docOf));
+    },
+    async deleteEncounter(enc) {
+      const { json } = await es('POST', `/${index}/_delete_by_query?refresh=true&conflicts=proceed`, { query: { term: { encounter_id: enc } } }, { allow: [404] });
+      return json.deleted || 0;
+    },
+    async scanFor(needle) {
+      const { json } = await es('POST', `/${index}/_count`, { query: { match_phrase: { text: needle } } }, { allow: [404] });
+      return json.count || 0;
+    },
+    async dropIndex() { if (index.startsWith('roloe-test-')) await es('DELETE', `/${index}`, undefined, { allow: [404] }); },
+  };
+}
