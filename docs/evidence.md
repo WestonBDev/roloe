@@ -34,4 +34,26 @@ What each sponsor tool does in Roloe, with links and numbers. Only what has actu
 
 ## Guest-path rehearsals
 
-See [Guest path readiness](#guest-path-readiness) below.
+
+
+## Guest path readiness
+
+Zero-install guest meetings against Elastic Cloud Serverless, with Weston's card (from today's Roloe work) answered by his own Claude Code (Sonnet, headless, his login on his Mac). Each run: cold page load, the guest submits, Weston's assistant was already waiting. Repos used are public and not ours. `node scripts/guest-rehearsal.mjs` reproduces it.
+
+| Run set | Public repo (p-retry) | Monorepo folder (next.js `packages/next/src/lib`) | Docs page (nodejs.org) | One sentence | Skip |
+| --- | --- | --- | --- | --- | --- |
+| 1 (11:50) | pass · 14.5 s · nothing strong | pass · 18.7 s · nothing strong | pass · 15.9 s · nothing strong | pass · 14.3 s · 1 finding | pass · 5.9 s · nothing strong |
+| 5 (12:22) | pass · 20.1 s · 2 findings | pass · 29.1 s · 2 findings | pass · 19.1 s · 2 findings | pass · 14.1 s · 3 findings | pass · 16.1 s · 1 finding |
+| 6 (12:31) | pass · 20.1 s · 1 finding | pass · 24.1 s · 1 finding | pass · 19.7 s · 3 findings | pass · 14.0 s · 3 findings | pass · 9.0 s · 1 finding |
+
+Times are from the guest pressing Send to findings on their page. The page opens in 2–16 ms; the meeting is prepared behind it.
+
+What the runs found and fixed (each test-first):
+- Opening took 3–14 s (the trace showed the card copy with ELSER inference). Now the guest's page answers at once.
+- Findings were mostly "nothing strong" because 40 of Weston's passages were searched against one guest sentence. Now the guest's material is the query over Weston's whole card.
+- GitHub's API allows 60 unauthenticated calls an hour per IP, shared by everyone at a venue. Repos are now read from the tarball, with a tree-walk fallback for folders deep in huge monorepos.
+- A stalled download could hang a meeting. There's now a hard 12 s cap; the meeting always opens.
+- An assistant could answer a stale meeting first. Now: oldest unanswered meeting from the last 10 minutes.
+- Privacy: an assistant's prose while answering meetings restates guests' material, and was going onto the owner's card. The indexer now skips it.
+
+Restart while a guest waits: meeting opened, coordinator restarted, then the page and card answered 200, Weston's assistant answered 19 s later, and the guest's page showed 3 findings at the same URL (Elastic Serverless, 12:33).
