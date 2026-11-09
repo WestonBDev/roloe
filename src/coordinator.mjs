@@ -380,7 +380,8 @@ export function buildApp({ store, guestReader = readGuestInput, guestReadTimeout
         });
         if (v.accepted) {
           accepted++;
-          kept.push({ id: newId('f', 4), giver: me, recipient: them, rank: accepted, ts: new Date().toISOString(), ...v.record });
+          const guestTry = enc.guest?.kind === 'github' && enc.guest.repo && v.record.change ? { try: { state: 'diff-pending' } } : {};
+          kept.push({ id: newId('f', 4), giver: me, recipient: them, rank: accepted, ts: new Date().toISOString(), ...v.record, ...guestTry });
         } else {
           dropped.push({ giver: me, reason: v.reason, ts: new Date().toISOString() });
         }
@@ -625,6 +626,71 @@ export function buildApp({ store, guestReader = readGuestInput, guestReadTimeout
   });
 
   r.add('GET', '/api/dashboard', ({ res }) => send(res, 200, dashboard()));
+
+  // ---------- Guest Try it: run on the giver's laptop, approved on the guest's phone ----------
+  r.add('GET', '/api/me/try-jobs', ({ req, res }) => {
+    const me = ownerByKey(req);
+    if (!me) throw new HttpError(401, 'unauthorized', 'Card key required');
+    const jobs = [];
+    for (const enc of Object.values(state.encounters)) {
+      if (enc.status !== 'open' || !enc.guest?.repo || enc.a !== me.owner) continue;
+      for (const f of enc.findings) {
+        if (f.giver !== me.owner || !['diff-pending', 'approved'].includes(f.try?.state)) continue;
+        jobs.push({ encounter_id: enc.id, finding: f.id, repo: enc.guest.repo, ref: enc.guest.ref || 'HEAD', path: enc.guest.path || '', edits: f.change.edits, state: f.try.state });
+      }
+    }
+    send(res, 200, { jobs });
+  });
+
+  const GUEST_TRY_FROM = {
+    review: ['diff-pending'], 'no-tests': ['diff-pending'], 'did-not-apply': ['diff-pending'],
+    installing: ['approved'], testing: ['approved', 'installing'], passed: ['approved', 'installing', 'testing'], failed: ['approved', 'installing', 'testing'],
+  };
+  r.add('POST', '/api/e/:id/guest-try', async ({ req, res, params }) => {
+    const enc = getEncounter(params.id);
+    const me = encOwner(req, enc);
+    if (!enc.guest || enc.a !== me) throw new HttpError(403, 'not_giver', 'Only the card owner runs a guest\'s Try it');
+    const b = await readJson(req, 200_000);
+    const f = enc.findings.find((x) => x.id === b.finding && x.giver === me && x.try);
+    if (!f) throw new HttpError(404, 'no_finding', 'No such Try it');
+    if (!GUEST_TRY_FROM[b.state]?.includes(f.try.state)) throw new HttpError(409, 'bad_transition', `Can't go from ${f.try.state} to ${b.state}`);
+    const num = (v) => (Number.isFinite(+v) && v !== null && v !== undefined ? Math.max(0, Math.round(+v)) : null);
+    f.try = { ...f.try, state: b.state, at: Date.now() };
+    if (['review', 'no-tests', 'did-not-apply'].includes(b.state)) {
+      f.try.diff = String(b.diff || '').slice(0, 80_000);
+      f.try.test_command = cleanLine(b.test_command || '', 80) || null;
+      f.try.reason = cleanLine(b.reason || '', 200) || null;
+    }
+    if (['passed', 'failed'].includes(b.state)) Object.assign(f.try, { passed: num(b.passed), failed: num(b.failed), test_ms: num(b.test_ms), reason: cleanLine(b.reason || '', 200) || null });
+    enc.tryStatus = { finding: f.id, state: b.state, passed: f.try.passed ?? null, failed: f.try.failed ?? null, test_ms: f.try.test_ms ?? null, sandbox: 'docker-network-none', at: Date.now() };
+    const now = Date.now();
+    if (['passed', 'failed', 'no-tests', 'did-not-apply'].includes(b.state)) {
+      await step('roloe.try', ref(enc), { 'roloe.try.state': b.state, 'roloe.try.guest': true, 'roloe.try.passed': f.try.passed ?? -1, 'roloe.try.test_ms': f.try.test_ms ?? -1, 'roloe.finding_hmac': hmac(enc.id, f.id),
+        ...(b.state === 'passed' && !enc.times.green ? { 'roloe.time_to_green_ms': now - enc.times.tap } : {}) }, async () => {});
+      record.help(b.state);
+    }
+    if (b.state === 'passed' && !enc.times.green && f.try.passed > 0) {
+      enc.times.green = now;
+      record.timeToHelp(now - enc.times.tap);
+      enc.thanks.push({ to: me, from: enc.b, finding: f.id, tests_passed: f.try.passed, ms_to_green: now - enc.times.tap, at: new Date(now).toISOString() });
+    }
+    save();
+    send(res, 200, { state: f.try.state });
+  });
+
+  r.add('POST', '/api/e/:id/try-approve', async ({ req, res, params, query }) => {
+    const enc = getEncounter(params.id);
+    const me = encSide(req, query, enc);
+    if (!enc.guest || me !== enc.b) throw new HttpError(403, 'not_guest', 'Only the guest approves');
+    const b = await readJson(req);
+    const f = enc.findings.find((x) => x.id === b.finding && x.recipient === me && x.try);
+    if (!f) throw new HttpError(404, 'no_finding', 'No such Try it');
+    if (f.try.state !== 'review') throw new HttpError(409, 'not_ready', f.try.state === 'no-tests' ? 'There are no tests to run for this change.' : 'Nothing to approve yet.');
+    f.try = { ...f.try, state: b.decline ? 'declined' : 'approved', at: Date.now() };
+    if (b.decline) { record.help('declined'); enc.tries.push({ finding: f.id, state: 'declined', at: Date.now() }); }
+    save();
+    send(res, 200, { state: f.try.state });
+  });
 
   // ---------- The person's view (phone link) ----------
   r.add('GET', '/api/e/:id', ({ req, res, params, query }) => {
