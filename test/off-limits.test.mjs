@@ -44,3 +44,25 @@ test('roloe off-limits: the terms never reach the coordinator, and a finding wit
     assert.match(list.stdout, /Zorvel/);
   } finally { await s.close(); }
 });
+
+test('join --off-limits applies the terms before the card is first uploaded', async () => {
+  const s = await startTestServer();
+  const home = mkdtempSync(join(tmpdir(), 'roloe-ol2-'));
+  const project = join(home, 'proj');
+  mkdirSync(project);
+  const git = (...a) => execFileSync('git', ['-C', project, ...a], { stdio: 'ignore' });
+  git('init', '-q'); git('config', 'user.email', 't@example.com'); git('config', 'user.name', 't');
+  writeFileSync(join(project, 'notes.md'), 'Paired with Zorvel on the deploy for Quintrax Labs today.\n');
+  git('add', '.'); git('commit', '-qm', 'notes');
+  const env = { ...process.env, HOME: home, ROLOE_HOME: join(home, '.roloe'), PATH: '/usr/bin:/bin:/opt/homebrew/bin:/usr/local/bin' };
+  try {
+    const seen = [];
+    const put = s.store.replaceCard.bind(s.store);
+    s.store.replaceCard = async (o, n, passages) => { seen.push(JSON.stringify(passages)); return put(o, n, passages); };
+    await run('node', [BIN, 'on', '--url', s.base, '--owner', 'ola', '--name', 'Ola', '--project', project, '--off-limits', 'Zorvel', '--off-limits', 'Quintrax Labs'], { env });
+    assert.ok(seen.length >= 1);
+    assert.ok(seen.every((p) => !/zorvel|quintrax/i.test(p)), 'never uploaded, not even once');
+    const cfg = JSON.parse(readFileSync(join(home, '.roloe', 'ola.json'), 'utf8'));
+    assert.deepEqual(cfg.offLimits.sort(), ['Quintrax Labs', 'Zorvel']);
+  } finally { await s.close(); }
+});

@@ -2,6 +2,8 @@
 
 **A business card that brings your work. Scan, and the person in front of you gets the help you already have.**
 
+**Keep talking. Your agents go deep.** At a conference, people keep their small talk, the human part. While they talk, Roloe has each person's own coding agent read the overlapping parts of the other's work, so both leave with the substance too: what the other person actually figured out today, in their own words, with the change and the tests to prove it. It's the agent-reviews-your-work idea, done between two people's agents, so the insight comes from someone else's real day rather than from a model's general knowledge.
+
 ## Run your card in two steps
 
 1. **Once, on your laptop** (Node 22, git, and Claude Code or Codex logged in on your own account):
@@ -20,7 +22,7 @@ Built during the WeMakeDevs Cloud Native Hackathon, November 9, 2026. AI coding 
 
 > The person next to you already fixed the thing you're stuck on. Neither of you will find out.
 
-Two people tap cards. Each person's **own** assistant (Claude Code, Codex, or any MCP client) reads the overlapping parts of the other person's shared work and returns at most three findings each way. Each finding is credited to a real moment in the giver's work and quotes the giver's own words. The recipient sees the literal diff, approves it, and **Try it** runs their tests in a container with no network. The giver gets a thank-you with the real test count.
+Someone scans your card's QR with their phone: no app, no account. They paste a public repo, a folder in one, any page, or one sentence about what they're working on. Within seconds their phone shows your best-matching words, verbatim and cited; within about a minute **your own** assistant (Claude Code, Codex, or any MCP client) has read the overlap and posted at most three findings, each credited to a real moment in your work. If a finding carries a change, they see the literal diff on their phone, approve it, and **Try it** runs their own tests in a container with no network. Two people with cards get the same both ways.
 
 Roloe's coordinator **runs no model and never holds anyone's login or token**. Each person's assistant does the reading on that person's own subscription.
 
@@ -65,7 +67,7 @@ flowchart LR
 Teal: each person's own machine and subscription. Purple: Roloe services, no model, no credentials. The same diagram is served at `/how` for a projector.
 
 1. **One switch.** `roloe on` indexes today's work for one project: the owner's own typed messages and the assistant's prose from today's Claude Code and Codex sessions (never tool output, never other sessions' briefs), tracked text files in ~50-line chunks, and the last 25 commits. Everything is scrubbed for secret shapes on the owner's machine and **again** on arrival. `roloe show` (or `/me/<you>`) prints exactly what is shared; anything can be kept private.
-2. **Tap.** Scanning a card's QR opens `/g/<owner>`. With your own card on the phone it offers "Tap as you"; otherwise it's the zero-install guest path. At the tap the coordinator copies both cards into a new encounter in Elasticsearch, mints that encounter's key, and precomputes the overlap both ways (about 40 of the giver's passages as queries against the recipient's, reciprocal rank fusion, top 8 with 3 slots kept for files so a finding can carry a code change).
+2. **Scan.** Scanning a card's QR opens `/g/<owner>`, the zero-install guest page; with your own card on the phone it offers "Meet as you". The coordinator reads what the guest gave (public https only, capped, scrubbed), copies the cards into a new encounter in Elasticsearch, opens that encounter's scope (a per-meeting document-level-security key where Elasticsearch allows minting one; on Elastic Cloud Serverless, the coordinator's `encounter_id` filter on every read), shows the guest the best-matching passage verbatim within seconds, and precomputes the overlap (about 40 of the giver's passages as queries against the recipient's, reciprocal rank fusion, top 8 with 3 slots kept for files so a finding can carry a code change).
 3. **Sealed lines.** Each person may seal one line about what they expect. The browser sends only SHA-256(`nonce|line`); the line opens when the findings land.
 4. **Findings.** Each assistant calls `roloe_pull` (or is woken by the tap), reads its slice, and posts at most three findings with `roloe_post_findings`. The **local egress gate** on the giver's machine blocks anything containing a value the scrubber removed from their work. The coordinator then drops, in code, any finding whose citation doesn't resolve to the giver's passage inside this encounter, whose quote isn't verbatim, whose `about` isn't the recipient's, whose change leaves the project, or that fails the gate.
 5. **Try it.** `roloe try` runs on the recipient's laptop: it copies the project, applies the edits (each must match exactly once), shows the literal `git diff` on `127.0.0.1:7421`, and after approval installs dependencies from the lockfile, then runs the tests with `--network none --read-only`, no environment and no home mount. Green means exit 0 **and** at least one test ran. Only status and counts go to the coordinator.
@@ -76,7 +78,7 @@ Teal: each person's own machine and subscription. Purple: Roloe services, no mod
 
 | Tool | What it does in Roloe |
 | --- | --- |
-| **Elasticsearch** | The data layer and the privacy boundary. One passage index (`owner_id`, `encounter_id`, `kind`, `speaker`, `ts`, `text`, plus `semantic_text` where an inference endpoint exists). Cards are copied into each encounter with search + `_bulk?refresh=true`. Each encounter gets an API key minted with user credentials whose role descriptor carries document-level security (`query: {term: {encounter_id}}`), so the key alone can't reach anything else. Overlap uses `_msearch`, and the `rrf` retriever over lexical + semantic on licensed clusters. Stop invalidates the key and `_delete_by_query`s the copies. `node scripts/elastic-check.mjs` prints the live scope mode and a raw no-filter proof. |
+| **Elasticsearch** | The data layer and the privacy boundary. One passage index (`owner_id`, `encounter_id`, `kind`, `speaker`, `ts`, `text`, and `semantic_text` on `.elser-2-elastic`). Cards are copied into each meeting with search + `_bulk?refresh=true`; overlap retrieval is hybrid (BM25 + `semantic_text`, fused with the `rrf` retriever) over `_msearch`; a pull or a post fetches its passages in one request. **Scope, honestly:** on a licensed cluster with user credentials each meeting gets an API key whose role descriptor carries document-level security (`query: {term: {encounter_id}}`). The live deployment is Elastic Cloud Serverless, where Elasticsearch refuses to derive a privileged key from an API key, so there the coordinator's `encounter_id` filter on every read is the scope; `/healthz` and the stage say which mode is live. Stop deletes the meeting's copies and records Elasticsearch's own answer to the old scope. `node scripts/elastic-check.mjs` prints the live mode and a raw no-filter proof. |
 | **Dash0** | OpenTelemetry from the first route. Every request is a span; every encounter is one trace with `roloe.tap`, `roloe.overlap`, `roloe.seal`, `roloe.pull`, `roloe.findings`, one `roloe.finding.check` per finding, `roloe.try` (with `roloe.time_to_green_ms`), `roloe.probe` and `roloe.stop`. Attributes are IDs, counts, sizes and per-encounter HMACs; the HMAC key is destroyed on stop. Never text. `node scripts/otlp-check.mjs` proves export. |
 | **Radar / Argo CD** | `deploy/coordinator.yaml` (non-root, read-only root, all capabilities dropped, seccomp RuntimeDefault) and `argocd/application.yaml` (automated sync, prune, self-heal). Every push to `main` builds the image to GHCR and pins it in `deploy/kustomization.yaml`; Argo CD rolls it into `team-roloe`. |
 | **Gitar** | Every feature arrives as a pull request reviewed against `.gitar/review/roloe-invariants.md`: content never in telemetry, no credentials, every read scoped, findings must cite, gate before egress, sandboxed Try it, stop really stops. |
@@ -194,6 +196,26 @@ Traces and metrics go to Dash0 over OTLP (`node scripts/otlp-check.mjs` sends on
 - **Recorded.** Every meeting keeps its record (times, findings, Try it result). The stage replays one on its own real clock with `&replay=1`, or switches to one automatically at 1:40 with `&recorded=<id>&rk=<stage key>`; either way the screen says **Recorded HH:MM**.
 - **Same person, two projects.** As a last resort, `roloe on --owner <you>-two --project <other project> --same-person-as <you>` makes a second card. It needs your first card's key, and every screen labels the pair "same person, two projects".
 
+## Accessibility
+
+Even if conversation is hard for you (a loud hall, a second language, neurodivergent, introverted), you still leave with the substance: in text, on your own phone, at your own pace.
+
+- **Phone only, one hand.** The guest path is a single page: one text box or one link, Send. Buttons are at least 44 px; inputs are 16 px or more so phones don't zoom; nothing scrolls sideways.
+- **Readable at arm's length.** Large type on ruled cards; the QR page is black on white, full screen, with the short URL under it.
+- **No time pressure.** Nothing expires while you read. Your meeting stays at the same link, and every card you scanned is filed in your Roloe on that phone (`/r`).
+- **Screen readers.** Pages use real headings, labelled inputs and buttons, live regions for arriving findings, and words alongside every colour.
+- **Reduced motion.** `prefers-reduced-motion` turns every animation off; sound is optional.
+
+## Evidence
+
+One line per thing the judges asked for; details in [docs/evidence.md](docs/evidence.md).
+
+- **Gitar:** every feature arrived as a reviewed PR ([#1](https://github.com/WestonBDev/roloe/pull/1) to [#20](https://github.com/WestonBDev/roloe/pull/20)); every Gitar finding was fixed test-first in a commit marked "(Gitar)". Review instructions: [.gitar/review/](.gitar/review/); repository rules: [.gitar/rules/](.gitar/rules/). CI failure diagnosis on a real failure: [#19](https://github.com/WestonBDev/roloe/pull/19).
+- **Dash0:** traces, metrics and the time-to-help SLO from the first route; a slowdown Dash0 flagged, fixed in [#17](https://github.com/WestonBDev/roloe/pull/17) (Elasticsearch requests per meeting 25 → 7; pull p95 1.36 s → 0.25 s).
+- **Elastic:** hybrid retrieval and per-meeting scope on Elastic Cloud Serverless; the scope mode and its proof in [docs/evidence.md](docs/evidence.md#elasticsearch-the-data-layer-and-the-privacy-boundary).
+- **Radar:** deployed by Argo CD to `team-roloe`; Checks before ([docs/evidence/radar-checks-before.jpg](docs/evidence/radar-checks-before.jpg)) and an AI investigation of a rollout ([docs/evidence/radar-investigation-rollout.jpg](docs/evidence/radar-investigation-rollout.jpg)).
+- **The product:** 10 of 10 rehearsed guest meetings (repo, monorepo folder, page, sentence, skip) with findings in 9–29 s; guest Try it ran a real public repo's 132 tests green with no network.
+
 ## Live and recorded
 
 - Live: everything in the demo is live unless the stage shows the **Recorded** label, which appears only if the live cross-read isn't finished at 1:40.
@@ -201,10 +223,13 @@ Traces and metrics go to Dash0 over OTLP (`node scripts/otlp-check.mjs` sends on
 
 ## Measured today
 
-| Run | Setup | Tap → overlap ready | Prompt → findings posted | Notes |
-| --- | --- | --- | --- | --- |
-| Smoke, 10:2x | Local Elasticsearch (Basic), fixture partner + Weston's Roloe card | 0.82 s | Codex 22.6 s ("nothing strong"); Claude Code Sonnet via MCP 25.2 s (1 finding with a 3-edit change, accepted) | Assistants launched by hand after the tap, so these aren't tap → findings |
-| Try it | Docker via Colima, fixture project | | | deps + tests with `--network none`; the fixture's own `fetch` test proves the network is off |
+| What | Where | Result |
+| --- | --- | --- |
+| Guest meetings, 5 kinds of input, twice in a row | Elastic Cloud Serverless, Weston's card, his Claude Code (Sonnet) | 10 of 10 with findings; Send → findings 9–29 s; page opens in under 20 ms |
+| Their words, instantly | same | Send → best-matching passage on the phone in 3.3–4.1 s |
+| Guest Try it | a public repo (p-retry), Docker with `--network none` | 132 tests passed, 63 s from approval |
+| Restart mid-meeting | same | page and card back; findings arrived at the same link |
+| Elasticsearch per meeting, before → after #17 | exported spans | 25 → 7 requests; pull p95 1,362 → 247 ms |
 
 ## Known limits
 

@@ -12,7 +12,7 @@ const { values: opt, positionals: pos } = parseArgs({
   options: {
     url: { type: 'string' }, owner: { type: 'string' }, name: { type: 'string' }, line: { type: 'string' },
     project: { type: 'string' }, json: { type: 'boolean' }, ui: { type: 'boolean' }, all: { type: 'boolean' },
-    wait: { type: 'string' }, port: { type: 'string' }, undo: { type: 'boolean' }, 'same-person-as': { type: 'string' },
+    wait: { type: 'string' }, port: { type: 'string' }, undo: { type: 'boolean' }, 'same-person-as': { type: 'string' }, 'off-limits': { type: 'string', multiple: true },
   },
 });
 
@@ -38,6 +38,8 @@ const commands = {
       out(`Registered card "${cfg.owner}" at ${url}`);
     }
     if (opt.project) cfg.project = resolve(opt.project);
+    // Off-limits terms given here apply before anything is uploaded.
+    if (opt['off-limits']?.length) cfg.offLimits = [...new Set([...(cfg.offLimits || []), ...opt['off-limits'].map((t) => t.trim()).filter(Boolean)])];
     if (opt.url && opt.url.replace(/\/$/, '') !== cfg.url.replace(/\/$/, '')) {
       // A new coordinator (e.g. the cluster): the old key means nothing there, so register again.
       const reg = await api({ url: opt.url }, 'POST', '/api/owners', { owner: cfg.owner, name: opt.name || cfg.name, line: opt.line || '' }, { key: '' });
