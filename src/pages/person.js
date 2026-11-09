@@ -12,14 +12,15 @@ const draw = {
 };
 let view = null;
 let firstSeen = Date.now();
+let justFiled = false;
 
 function title(v) {
-  $('#title').innerHTML = `${esc(v.my_name)} ↔ ${esc(v.their_name)}${v.same_person ? ' <span class="label rec">same person, two projects</span>' : ''}`;
+  // A guest has no name here: the page is simply the person they scanned.
+  $('#title').innerHTML = v.guest && String(v.me).startsWith('guest-') ? esc(v.their_name)
+    : `${esc(v.my_name)} ↔ ${esc(v.their_name)}${v.same_person ? ' <span class="label rec">same person, two projects</span>' : ''}`;
   $('#when').textContent = hhmm(v.created);
   document.title = `Roloe · ${v.their_name}`;
-  $('#consent').textContent = v.guest
-    ? `${v.their_name}'s assistant reads only the link you gave, if any. Nothing else about you is read.`
-    : `${v.their_name}'s assistant reads only what you shared today, for this meeting. Stop ends it for both of you.`;
+  $('#consent').textContent = v.guest ? '' : `${v.their_name}'s assistant reads only what you shared today, for this meeting. Stop ends it for both of you.`;
   $('#stop').hidden = v.status !== 'open';
 }
 
@@ -43,7 +44,7 @@ function waitSection(v) {
   if (v.status === 'preparing') {
     return `<div class="card"><span class="tab">Opening your meeting with ${esc(v.their_name)}</span>
       <h2>${v.guest_input?.kind === 'reading' ? 'Reading what you gave…' : 'Getting the cards side by side…'}</h2>
-      <p class="state wait">Keep talking. This takes a few seconds.</p></div>`;
+      <p class="state wait">Keep talking.</p></div>`;
   }
   if (v.status === 'failed') {
     return `<div class="card"><span class="tab">Couldn't open</span><h2>${esc(v.guest_input?.error || 'This meeting could not be opened.')}</h2>
@@ -53,7 +54,7 @@ function waitSection(v) {
   if (v.guest && v.instant) return '';   // the instant card carries the waiting state
   const n = Math.round((Date.now() - firstSeen) / 1000);
   return `<div class="card"><span class="tab">${esc(v.their_name)}'s assistant is reading</span>
-    <h2>Keep talking. We'll show it here when there's something.</h2>
+    <h2>Keep talking.</h2>
     <p class="state wait"><span class="mono" id="secs">${n} s</span></p>
     ${n > 60 ? `<p class="muted" style="margin-top:6px">Still reading. ${esc(v.their_name)}'s assistant sometimes takes a little longer. This page updates by itself, and this link keeps working if you come back later.</p>` : ''}</div>`;
 }
@@ -65,19 +66,21 @@ function tryBlock(f, v) {
   const t = f.try;
   if (!t) return '';
   const who = esc(v.their_name);
-  const head = '<p class="label" style="margin:10px 0 6px">Try it on your repo</p>';
+  const head = '<p class="label" style="margin:6px 0 10px">Try it on your repo</p>';
+  const secs = ((t.test_ms || 0) / 1000).toFixed(1);
   switch (t.state) {
-    case 'diff-pending': return `<div class="card">${head}<p class="state wait">Putting the change on a fresh copy of your public repo…</p></div>`;
+    case 'diff-pending': return `<div class="card">${head}<p class="state wait">Putting the change on a copy of your repo…</p></div>`;
     case 'review': return `<div class="card">${head}${diffLines(t.diff)}
-      <p class="muted" style="font-size:14px;margin-top:8px">Runs on ${who}'s laptop in a sandbox: your public repo, this change, your tests (<code>${esc(t.test_command || 'tests')}</code>). Dependencies install first; then the network is cut. Nothing is pushed anywhere, and the copy is deleted after.</p>
-      <div class="row" style="margin-top:10px"><button data-approve="${esc(f.id)}">Approve and run my tests</button><button class="ghost" data-decline="${esc(f.id)}">No thanks</button></div></div>`;
-    case 'no-tests': return `<div class="card">${head}${diffLines(t.diff)}<p style="margin-top:8px"><b>No tests to run.</b> ${esc(t.reason || 'This project has no test command, so the change was not run.')} The change above is offered as is.</p></div>`;
-    case 'did-not-apply': return `<div class="card">${head}<p><b>The change didn't apply to your repo as it is now.</b> ${esc(t.reason || '')}</p><p class="muted">The finding still stands as advice.</p></div>`;
-    case 'approved': return `<div class="card">${head}<p class="state wait">Approved. Starting the sandbox on ${who}'s laptop…</p></div>`;
-    case 'installing': return `<div class="card">${head}<p class="state wait">Installing your dependencies from your lockfile (network on)…</p></div>`;
+      <p class="cite" style="margin-top:10px">${esc(t.test_command || 'your tests')} · no network · nothing pushed</p>
+      <button class="wide" style="margin-top:12px" data-approve="${esc(f.id)}">Approve and run my tests</button>
+      <button class="ghost wide quiet" style="margin-top:6px" data-decline="${esc(f.id)}">No thanks</button></div>`;
+    case 'no-tests': return `<div class="card">${head}${diffLines(t.diff)}<p style="margin-top:8px"><b>No tests to run.</b> ${esc(t.reason || 'This project has no test command, so the change was not run.')}</p></div>`;
+    case 'did-not-apply': return `<div class="card">${head}<p><b>The change didn't apply to your repo as it is now.</b> ${esc(t.reason || '')}</p></div>`;
+    case 'approved': return `<div class="card">${head}<p class="state wait">Starting the sandbox on ${who}'s laptop…</p></div>`;
+    case 'installing': return `<div class="card">${head}<p class="state wait">Installing your dependencies…</p></div>`;
     case 'testing': return `<div class="card">${head}<p class="state wait">Running your tests with no network…</p></div>`;
-    case 'passed': return `<div class="card">${head}<p class="state ok">${t.passed} of your tests passed with this change, in ${((t.test_ms || 0) / 1000).toFixed(1)} s, with no network.</p><p class="muted">Nothing was pushed. Copy the change from the diff if you want it.</p></div>`;
-    case 'failed': return `<div class="card">${head}<p class="state bad">${t.reason ? esc(t.reason) : `${t.failed ?? '?'} failed, ${t.passed ?? 0} passed.`}</p><p class="muted">Your repo is unchanged.</p></div>`;
+    case 'passed': return `<div class="card">${head}<p class="verdict">${t.passed} tests passed</p><p class="cite">${t.passed} of your tests passed with this change · ${secs} s · no network · nothing pushed</p></div>`;
+    case 'failed': return `<div class="card">${head}<p class="verdict bad">${t.reason ? esc(t.reason) : `${t.failed ?? '?'} failed, ${t.passed ?? 0} passed`}</p><p class="cite">your repo is unchanged</p></div>`;
     case 'declined': return `<div class="card">${head}<p>Declined. Nothing was run.</p></div>`;
     default: return '';
   }
@@ -91,8 +94,8 @@ function instantCard(v) {
   if (!i || v.findings.length || v.their_side.posted) return '';
   const name = esc(v.their_name);
   const status = v.their_assistant === 'online'
-    ? `<p class="state wait">${name}'s assistant is reading the rest; written findings will replace this.</p>`
-    : `<p class="state">${name}'s assistant will answer when it's back. Here's what ${name} wrote that matches.</p>`;
+    ? `<p class="state wait">${name}'s agent is reading the rest…</p>`
+    : `<p class="state">${name}'s agent will answer when it's back.</p>`;
   return `<article class="card deal instant"><span class="tab">${name} <span class="mono">· matched instantly</span></span>
     <p class="quote${i.kind === 'file' ? ' code' : ''}">${esc(i.text)}</p>
     <p class="label">${esc((WHOSE[i.whose] || WHOSE.session)(v.their_name))}</p>
@@ -139,18 +142,18 @@ function receiptSection(v) {
 function guestSection(v) {
   if (!v.guest) return '';
   const gi = v.guest_input || {};
-  const read = gi.error ? `<div class="card"><span class="tab">About your link</span><p>${esc(gi.error)}</p><p class="muted">The meeting goes on with what you wrote, or with ${esc(v.their_name)}'s most useful work.</p></div>`
-    : gi.kind === 'github' ? `<p class="muted">Read ${gi.files ?? 0} files from your repo, for this meeting only.</p>`
-    : gi.kind === 'page' ? '<p class="muted">Read the text of your link, for this meeting only.</p>' : '';
-  const done = v.their_side.posted;
-  return `${read}${done ? `<div class="card"><span class="tab">Your turn, if you like</span>
-      <p>Get findings from your own work too: <code>git clone https://github.com/WestonBDev/roloe</code>, then <code>roloe on</code>. It's an offer, not a gate.</p></div>` : ''}
-    <form class="card" id="probe"><span class="tab">Try to extract something</span>
+  const read = gi.error ? `<div class="card"><span class="tab">About your link</span><p>${esc(gi.error)}</p></div>`
+    : gi.kind === 'github' ? `<p class="cite">read ${gi.files ?? 0} files from your repo · this meeting only</p>`
+    : gi.kind === 'page' ? '<p class="cite">read the text of your link · this meeting only</p>' : '';
+  // The extraction attempt stays one tap away: it is for the curious, not for everyone's first read.
+  return `${read}
+    <details class="card"><summary>Try to extract something</summary>
+    <form id="probe">
       <label for="q"><p>Type anything you think ${esc(v.their_name)} might have that wasn't shared. This asks the coordinator directly, not anyone's assistant.</p></label>
       <input id="q" type="text" autocomplete="off" spellcheck="false" placeholder="a word, a secret, a canary">
-      <div class="row" style="margin-top:12px"><button type="submit">Try it</button></div>
+      <button type="submit" class="wide" style="margin-top:12px">Try it</button>
       <p id="probeout" aria-live="polite" style="margin-top:12px"></p>
-    </form>`;
+    </form></details>`;
 }
 
 async function maybeReveal(v) {
@@ -232,8 +235,9 @@ async function refresh() {
   try {
     view = await api(`/api/e/${id}`, { key });
     // Only the guest's phone files the meeting, never the card owner's.
-    if (view.guest && String(view.me).startsWith('guest-') && fileInWheel(view)) {
-      $('#title').insertAdjacentHTML('afterend', `<p class="muted" style="font-size:14px">Filed in <a href="/r?new=${esc(id)}">your Roloe</a> on this phone.</p>`);
+    if (view.guest && String(view.me).startsWith('guest-')) {
+      if (fileInWheel(view)) justFiled = true;
+      $('#filed').innerHTML = `<a class="btn ghost wide" href="/r${justFiled ? `?new=${esc(id)}` : ''}">Your Roloe</a>`;
     }
     if (view.times?.tap) firstSeen = view.times.tap;
     $('#err').hidden = true;

@@ -9,31 +9,58 @@
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Caveat:wght@500&family=IBM+Plex+Sans:wght@400;600;700&family=JetBrains+Mono:wght@400;600&display=swap">
 <link rel="stylesheet" href="/roloe.css">
 <style>
-  main.wheel { gap: 14px; }
-  .stack { position: relative; perspective: 1100px; touch-action: none; margin-top: 30px; }   /* our swipe, not the page's scroll */
-  .stack .card { position: relative; margin-top: 0; transform-origin: 50% 100%; will-change: transform; }
-  .stack .card.behind { position: absolute; inset: 0 0 auto 0; height: 120px; pointer-events: none; }
-  .stack .card .quote { font-size: 28px; }
-  .stack .card .quote.code { font-size: 15px; line-height: 1.5; }
-  .controls { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
-  .controls button { min-width: 64px; font-size: 22px; }
-  .count { font: 600 14px/1 var(--mono); color: var(--pencil); }
+  /* Your Roloe is a rotary card file: cards stand on a spindle, one upright to read, the ones
+     you've passed leaning back, the ones to come fanned toward you. Drag or flick to turn it. */
+  body { overflow-x: hidden; }
+  main.wheel { gap: 6px; }
+  .rolo { position: relative; height: calc(var(--h) + var(--hub) + 118px); margin: 6px -16px 0; overflow: hidden; perspective: 1250px; perspective-origin: 50% 30px;
+    touch-action: none; user-select: none; -webkit-user-select: none; cursor: grab; outline: none; }
+  .spin { position: absolute; left: 50%; top: calc(var(--h) + var(--hub) + 40px); width: 0; height: 0; transform-style: preserve-3d; transform: rotateX(-9deg); }
+  .leaf { position: absolute; left: calc(var(--w) / -2); top: calc((var(--h) + var(--hub)) * -1); width: var(--w); height: var(--h);
+    transform-origin: 50% calc(var(--h) + var(--hub)); transform-style: preserve-3d; will-change: transform; }
+  .leaf .ltab { position: absolute; top: -25px; height: 26px; max-width: 46%; padding: 4px 12px 0; border-radius: 8px 8px 0 0; background: var(--stock);
+    font: 600 13px/1.5 var(--sans); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; box-shadow: inset 0 -5px 0 rgba(0,0,0,.04); }
+  .leaf .ltab:empty { width: 22%; }
+  .leaf .paper { position: absolute; inset: 0; border-radius: 12px; overflow: hidden; background: var(--stock);
+    background-image: linear-gradient(var(--stock) 0 44px, transparent 44px), repeating-linear-gradient(to bottom, transparent 0 25px, var(--rule) 25px 26px);
+    box-shadow: 0 0 0 1px rgba(120,105,80,.28), 0 6px 18px rgba(20,24,28,.10); }
+  .leaf .paper::before { content: ""; position: absolute; left: 0; right: 0; top: 34px; height: 2px; background: var(--red); opacity: .8; }
+  /* the two holes the rails run through */
+  .leaf .paper::after { content: ""; position: absolute; bottom: -13px; left: 0; right: 0; height: 26px;
+    background: radial-gradient(circle at 30% 50%, #1a1714 12px, transparent 12.5px), radial-gradient(circle at 70% 50%, #1a1714 12px, transparent 12.5px); }
+  .leaf .face { position: absolute; inset: 46px 18px 30px 18px; display: flex; flex-direction: column; gap: 8px; overflow: hidden; }
+  .leaf .face .quote { font: 500 27px/1.08 var(--hand); margin: 0; display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; }
+  .leaf .face .quote::before { content: "\201C"; } .leaf .face .quote::after { content: "\201D"; }
+  .leaf .face .quote.code { font: 500 13px/1.45 var(--mono); -webkit-line-clamp: 4; overflow-wrap: anywhere; }
+  .leaf .face .quote.code::before, .leaf .face .quote.code::after { content: none; }
+  .leaf .face .what { font: 400 15px/1.35 var(--sans); margin: 0; color: var(--pencil); display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+  .leaf .shade { position: absolute; inset: 0; border-radius: 12px; background: #28201a; opacity: 0; pointer-events: none; }
+  .hub { position: absolute; left: calc(var(--w) / -2 - 10px); top: calc(var(--hub) * -0.62); width: calc(var(--w) + 20px); height: calc(var(--hub) * 1.24); border-radius: var(--hub);
+    background: linear-gradient(180deg, #4a4642 0%, #161412 45%, #050505 70%, #2c2926 100%); box-shadow: 0 14px 26px rgba(0,0,0,.35); }
+  .knob { position: absolute; top: calc(var(--hub) * -1.25); width: calc(var(--hub) * 2.5); height: calc(var(--hub) * 2.5); border-radius: 50%;
+    background: repeating-conic-gradient(from 0deg, rgba(255,255,255,.08) 0deg 6deg, transparent 6deg 12deg), radial-gradient(circle at 42% 38%, #4b4743 0%, #1d1b19 45%, #0a0909 72%);
+    box-shadow: inset 0 0 0 5px #0c0b0a, inset 0 0 0 7px #34302c, 0 10px 20px rgba(0,0,0,.45); }
+  .knob.l { left: calc(var(--w) / -2 - var(--hub) * 1.6); } .knob.r { left: calc(var(--w) / 2 - var(--hub) * 0.9); }
+  .controls { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-top: 4px; }
+  .controls button { min-width: 84px; font-size: 30px; }
+  .count { font: 600 16px/1 var(--mono); color: var(--pencil); }
   .empty { text-align: center; }
-  @keyframes dropin { 0% { transform: translateY(-120%) rotate(-3deg); opacity: 0; } 70% { transform: translateY(4%) rotate(.5deg); opacity: 1; } 100% { transform: none; } }
-  .dropin { animation: dropin 650ms cubic-bezier(.2,.9,.25,1.15) backwards; }
 </style>
 </head>
 <body>
-<header class="top"><span class="wordmark">Roloe</span><button id="sound" class="ghost" style="min-height:36px;padding:6px 12px;font-size:14px" aria-pressed="true">Sound on</button></header>
+<header class="top"><span class="wordmark">Roloe</span><button id="sound" class="ghost small" aria-pressed="true">Sound on</button></header>
 <main class="wheel">
-  <h1 style="font-size:28px">Your Roloe</h1>
-  <p class="muted" style="font-size:15px">Everyone you met by scanning their card, with what they gave you. Kept only on this phone: no account, nothing stored about you.</p>
-  <section id="stack" class="stack" aria-live="polite" aria-roledescription="card stack"></section>
+  <h1 style="font-size:34px">Your Roloe</h1>
+  <p class="label">Everyone you met · kept only on this phone</p>
+  <section id="rolo" class="rolo" tabindex="0" aria-roledescription="rotary card file" aria-label="Your Roloe. Swipe up or down, or use the arrow keys, to turn it."><div id="spin" class="spin"></div></section>
+  <p id="say" class="sr" aria-live="polite"></p>
   <div class="controls" id="controls" hidden>
     <button id="prev" class="ghost" aria-label="Previous card">‹</button>
     <span class="count" id="count"></span>
     <button id="next" class="ghost" aria-label="Next card">›</button>
   </div>
+  <a id="open" class="btn wide" style="margin-top:10px" hidden>Open this card</a>
+  <div id="empty"></div>
 </main>
 <script type="module" src="/rum.js"></script>
 <script type="module" src="/wheel.js"></script>

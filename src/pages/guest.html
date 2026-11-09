@@ -9,26 +9,25 @@
 <link rel="stylesheet" href="/roloe.css">
 </head>
 <body>
-<header class="top"><span class="wordmark">Roloe</span><span class="muted">no app, no account</span></header>
+<header class="top"><span class="wordmark">Roloe</span><a id="mine" class="btn ghost small" href="/r" hidden>Your Roloe</a></header>
 <main>
   <article class="card" id="face"><span class="tab" id="tab">Opening…</span>
-    <h2 id="name" style="font-size:30px;margin-bottom:0">&nbsp;</h2>
-    <p class="quote" id="line" style="font-size:26px"></p>
+    <h2 id="name" class="who">&nbsp;</h2>
+    <p class="quote" id="line"></p>
     <p class="cite" id="meta"></p>
   </article>
   <div id="as"></div>
-  <p style="font:600 18px/1.3 var(--sans)">Keep talking. Your agents go deep.</p>
-  <form class="card" id="start" hidden><span class="tab">Your side</span>
+  <form class="card" id="start" hidden><span class="tab">You</span>
     <label for="text"><h2>What are you working on, or stuck on right now?</h2></label>
-    <textarea id="text" rows="3" maxlength="600" placeholder="One to three sentences"></textarea>
-    <label for="link"><p style="margin-top:12px"><b>Or a link</b> <span class="muted">· a public repo, a folder in one, a post, a README</span></p></label>
-    <input id="link" type="url" inputmode="url" autocomplete="off" placeholder="https://github.com/you/project/tree/main/folder">
-    <p class="state" style="margin-top:10px;color:var(--red)">Nothing private, please.</p>
-    <p class="muted" style="font-size:14px">Whatever you give is scrubbed, read only for this meeting, and deleted when it ends. Nothing about you is looked up unless you give it here.</p>
-    <div class="row" style="margin-top:14px"><button type="submit" id="send">Send</button><button type="button" class="ghost" id="skip">Skip</button></div>
+    <textarea id="text" rows="3" maxlength="600" placeholder="One sentence is enough"></textarea>
+    <label for="link" class="sr">Or a link: a public repo, a folder in one, a post, a README</label>
+    <input id="link" type="url" inputmode="url" autocomplete="off" placeholder="or paste a repo link" style="margin-top:14px">
+    <p class="state" style="margin-top:16px;color:var(--red)">Nothing private, please.</p>
+    <button type="submit" id="send" class="wide" style="margin-top:16px">Send</button>
+    <button type="button" class="ghost wide quiet" id="skip" style="margin-top:6px">Skip</button>
   </form>
   <p id="err" class="state bad" hidden></p>
-  <p class="muted" style="font-size:14px" id="how"></p>
+  <div id="back"></div>
 </main>
 <script type="module" src="/rum.js"></script>
 <script type="module" src="/guest.js"></script>
