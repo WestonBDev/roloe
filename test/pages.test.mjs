@@ -91,6 +91,7 @@ test('phone pages: big targets, no leftover status dot, and your Roloe is a rota
     assert.match(html, /aria-roledescription="rotary card file"/);
     const js = await (await fetch(s.base + '/wheel.js')).text();
     assert.match(js, /angleFor/);
-    assert.match(js, /if \(still\) \{ p = target; paint\(\); return; \}/, 'reduced motion: the file jumps instead of turning');
+    assert.match(html, /prefers-reduced-motion: reduce\) \{ \.leaf, \.leaf \.shade \{ transition: none/, 'reduced motion: the file jumps instead of turning');
+    assert.match(html, /transition: transform 440ms/, 'a turn is a compositor transition, never a repaint per frame');
   } finally { await s.close(); }
 });
