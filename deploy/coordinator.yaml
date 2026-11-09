@@ -9,6 +9,12 @@ metadata:
 data:
   ROLOE_ENVIRONMENT: radar-cluster
   OTEL_SERVICE_NAME: roloe-coordinator
+  # ELSER (.elser-2-elastic) hit Elastic's trial limit (HTTP 429) at 14:40, so meetings could not
+  # open. This index's semantic field runs on Jina alone (multilingual too); cards were moved
+  # into it with scripts/move-cards.mjs.
+  ES_INDEX: roloe-passages-jina
+  ES_INFERENCE_ID: .jina-embeddings-v5-text-small
+  ROLOE_MULTILINGUAL: "off"
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim

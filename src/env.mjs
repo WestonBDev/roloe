@@ -23,6 +23,7 @@ export const config = {
   esPassword: process.env.ELASTIC_URL ? (process.env.ELASTIC_PASSWORD || '') : (process.env.ES_PASSWORD || ''),
   esApiKey: process.env.ELASTIC_URL ? (process.env.ELASTIC_API_KEY || '') : '',
   esIndex: process.env.ES_INDEX || 'roloe-passages',
+  esInference: process.env.ES_INFERENCE_ID || '',   // semantic model for a NEW index, e.g. .jina-embeddings-v5-text-small
   otlpEndpoint: process.env.OTEL_EXPORTER_OTLP_ENDPOINT || '',
   dash0Token: process.env.DASH0_AUTH_TOKEN || '',
   dash0Dataset: process.env.DASH0_DATASET || '',

@@ -20,7 +20,7 @@ const MEETING_MAPPING = { dynamic: 'strict', properties: {
   time_to_findings_s: { type: 'float' }, try_state: { type: 'keyword' }, time_to_help_s: { type: 'float' }, stopped: { type: 'boolean' },
 } };
 
-export function elasticStore({ esUrl, esUser, esPassword, esApiKey, esIndex, fetchImpl = fetch }) {
+export function elasticStore({ esUrl, esUser, esPassword, esApiKey, esIndex, esInference = '', fetchImpl = fetch }) {
   const base = esUrl.replace(/\/$/, '');
   const index = esIndex;
   const meetingsIndex = `${esIndex.replace(/-passages$/, '')}-meetings`;   // roloe-passages -> roloe-meetings
@@ -109,7 +109,8 @@ export function elasticStore({ esUrl, esUser, esPassword, esApiKey, esIndex, fet
       const ids = exists.status !== 404 && wantMultilingual ? await inferenceIds() : [];
       if (exists.status === 404) {
         const ids = wantSemantic ? await inferenceIds() : [];
-        info.inference_id = SEMANTIC_CANDIDATES.find((c) => ids.includes(c)) || null;
+        // ES_INFERENCE_ID (e.g. Jina, when ELSER is rate-limited) wins when this project serves it.
+        info.inference_id = [esInference, ...SEMANTIC_CANDIDATES].find((c) => c && ids.includes(c)) || null;
         const jina = info.inference_id && wantMultilingual ? MULTILINGUAL_CANDIDATES.find((c) => ids.includes(c)) || null : null;
         const props = {
           passage_id: { type: 'keyword' }, owner_id: { type: 'keyword' }, owner_name: { type: 'keyword' },
