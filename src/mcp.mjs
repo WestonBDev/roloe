@@ -39,7 +39,7 @@ export async function runMcp() {
     { capabilities: { experimental: { 'claude/channel': {} }, tools: {} }, instructions: SERVER_INSTRUCTIONS },
   );
 
-  const inbox = async () => (await api(cfg, 'GET', '/api/me/encounters')).encounters;
+  const inbox = async () => (await api(cfg, 'GET', '/api/me/encounters', undefined, { headers: { 'x-roloe-client': 'assistant' } })).encounters;
   const latestOpen = async () => nextMeeting(await inbox());
   const pull = async (id) => api(cfg, 'GET', `/api/e/${id}/pull`);
 

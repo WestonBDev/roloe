@@ -16,7 +16,9 @@ test('a guest sees the best-matching words from the card at once, verbatim and c
     assert.equal(v.instant.whose, 'owner');
     assert.ok(v.instant.locator);
     assert.equal(v.their_assistant, 'unknown', 'the giver\'s assistant has not checked in yet');
-    await s.call('GET', '/api/me/encounters', null, wes);   // the assistant checks in
+    await s.call('GET', '/api/me/encounters', null, wes);   // the owner's /me page: not their assistant (Gitar)
+    assert.equal((await s.call('GET', `/api/e/${g.id}?k=${g.key}`)).body.their_assistant, 'unknown');
+    await s.call('GET', '/api/me/encounters', null, { ...wes, 'x-roloe-client': 'assistant' });   // the assistant checks in
     assert.equal((await s.call('GET', `/api/e/${g.id}?k=${g.key}`)).body.their_assistant, 'online');
   } finally { await s.close(); }
 });
