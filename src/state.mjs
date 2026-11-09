@@ -18,6 +18,7 @@ export function save() {
   timer = setTimeout(saveNow, 150);
 }
 export function saveNow() {
+  clearTimeout(timer);
   mkdirSync(config.dataDir, { recursive: true });
   const tmp = file + '.tmp';
   writeFileSync(tmp, JSON.stringify(state), { mode: 0o600 });
