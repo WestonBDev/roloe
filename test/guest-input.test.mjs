@@ -2,6 +2,10 @@
 // Fetched by the coordinator at scan time only, scrubbed, capped, and never from private addresses.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join, dirname } from 'node:path';
+import { execFileSync } from 'node:child_process';
 import { parseGuestLink, readGuestInput, htmlToText } from '../src/guest-input.mjs';
 
 const publicDns = async () => [{ address: '140.82.112.3', family: 4 }];
@@ -25,26 +29,41 @@ test('parses repo, subfolder and file links on GitHub, and other https pages', (
   assert.equal(parseGuestLink('javascript:alert(1)'), null);
 });
 
-test('a GitHub subfolder: only that folder\'s text files, scrubbed and capped', async () => {
-  const tree = { tree: [
-    { path: 'packages/api/README.md', type: 'blob', size: 120 },
-    { path: 'packages/api/src/retry.js', type: 'blob', size: 200 },
-    { path: 'packages/api/logo.png', type: 'blob', size: 900 },
-    { path: 'packages/web/src/app.js', type: 'blob', size: 100 },
-    { path: 'packages/api/.env', type: 'blob', size: 50 },
-  ] };
-  const f = fakeFetch([
-    [/api\.github\.com\/repos\/acme\/mono\/git\/trees\/main/, tree, 'application/json'],
-    [/packages\/api\/README\.md$/, '# API\nRetry uploads with backoff. Contact ops@example.com'],
-    [/packages\/api\/src\/retry\.js$/, 'export async function retry(fn) { for (;;) { try { return await fn(); } catch {} } }\n'],
-  ]);
-  const r = await readGuestInput({ link: 'https://github.com/acme/mono/tree/main/packages/api' }, { fetchImpl: f, lookup: publicDns });
+// Repos are read from GitHub's tarball download (codeload), not the API: the API allows 60
+// unauthenticated calls an hour per IP, and every judge at a venue shares one IP.
+function tarball(files) {
+  const root = mkdtempSync(join(tmpdir(), 'roloe-tgz-'));
+  const top = join(root, 'repo-abc123');
+  for (const [f, t] of Object.entries(files)) { mkdirSync(dirname(join(top, f)), { recursive: true }); writeFileSync(join(top, f), t); }
+  return readFileSync(execFileSync('sh', ['-c', `tar -czf "${root}/x.tgz" -C "${root}" repo-abc123 && echo "${root}/x.tgz"`], { encoding: 'utf8' }).trim());
+}
+const tgzFetch = (bytes, calls = []) => Object.assign(async (url) => { calls.push(String(url)); return /codeload\.github\.com/.test(String(url)) ? new Response(bytes, { status: 200, headers: { 'content-type': 'application/x-gzip' } }) : new Response('no', { status: 404 }); }, { calls });
+
+test('a GitHub subfolder: only that folder\'s text files, from the tarball, scrubbed', async () => {
+  const bytes = tarball({
+    'packages/api/README.md': '# API\nRetry uploads with backoff. Contact ops@example.com\n',
+    'packages/api/src/retry.js': 'export async function retry(fn) { for (;;) { try { return await fn(); } catch {} } }\n',
+    'packages/api/logo.png': 'PNG',
+    'packages/api/.env': 'SECRET=abc123abc123',
+    'packages/web/src/app.js': 'export const app = 1;\n',
+  });
+  const calls = [];
+  const r = await readGuestInput({ link: 'https://github.com/acme/mono/tree/main/packages/api' }, { fetchImpl: tgzFetch(bytes, calls), lookup: publicDns });
   assert.equal(r.kind, 'github');
   assert.deepEqual(r.passages.map((p) => p.source).sort(), ['packages/api/README.md', 'packages/api/src/retry.js']);
   assert.ok(r.passages.every((p) => /^p-[0-9a-f]{6}$/.test(p.passage_id) && p.kind === 'file'));
   assert.ok(!JSON.stringify(r.passages).includes('ops@example.com'), 'scrubbed');
-  assert.ok(!f.calls.some((u) => u.includes('packages/web') || u.includes('.env') || u.includes('logo.png')));
+  assert.ok(!JSON.stringify(r.passages).includes('abc123abc123'), '.env never read');
   assert.equal(r.repo, 'https://github.com/acme/mono');
+  assert.ok(calls.every((u) => u.startsWith('https://codeload.github.com/acme/mono/tar.gz/main')), 'no API calls');
+});
+
+test('a whole public repo: READMEs and source first, capped', async () => {
+  const files = { 'README.md': '# Widgets\nRetry with backoff and jitter so pushes succeed.\n' };
+  for (let i = 0; i < 80; i++) files[`src/m${i}.js`] = `export const m${i} = () => retry(${i});\n`;
+  const r = await readGuestInput({ link: 'https://github.com/acme/widgets' }, { fetchImpl: tgzFetch(tarball(files)), lookup: publicDns });
+  assert.equal(r.passages[0].source, 'README.md');
+  assert.ok(r.files <= 40);
 });
 
 test('any public page: text only, scripts dropped, chunked', async () => {
@@ -76,18 +95,8 @@ test('never fetches private or local addresses, and a failed fetch is reported, 
     assert.match(r.error, /public/i, addr);
   }
   const down = await readGuestInput({ link: 'https://github.com/acme/gone' }, { fetchImpl: fakeFetch([]), lookup: publicDns });
+  assert.match(down.error, /404|read/i);
   assert.equal(down.passages.length, 0);
   assert.ok(down.error);
 });
 
-test('a monorepo subfolder is fetched by walking the tree path, never the whole repo (large monorepos)', async () => {
-  const f = fakeFetch([
-    [/git\/trees\/main$/, { tree: [{ path: 'packages', type: 'tree', sha: 'shaPk' }, { path: 'README.md', type: 'blob', sha: 'r' }] }, 'application/json'],
-    [/git\/trees\/shaPk$/, { tree: [{ path: 'api', type: 'tree', sha: 'shaApi' }, { path: 'web', type: 'tree', sha: 'shaWeb' }] }, 'application/json'],
-    [/git\/trees\/shaApi\?recursive=1$/, { tree: [{ path: 'src/index.js', type: 'blob', size: 80 }] }, 'application/json'],
-    [/packages\/api\/src\/index\.js$/, 'export const handler = async () => retryWithBackoff();\n'],
-  ]);
-  const r = await readGuestInput({ link: 'https://github.com/acme/huge/tree/main/packages/api' }, { fetchImpl: f, lookup: publicDns });
-  assert.deepEqual(r.passages.map((p) => p.source), ['packages/api/src/index.js']);
-  assert.ok(!f.calls.some((u) => /git\/trees\/main\?recursive/.test(u)), 'never the whole repo tree');
-});

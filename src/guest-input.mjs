@@ -82,11 +82,27 @@ function chunkLines(text, source, kind, ts) {
 }
 
 async function readGithub(g, opts) {
-  const api = `https://api.github.com/repos/${g.owner}/${g.repo}/git/trees/${encodeURIComponent(g.ref)}?recursive=1`;
-  const tree = JSON.parse((await safeFetch(api, { ...opts, maxBytes: 5_000_000 })).text);
+  const trees = `https://api.github.com/repos/${g.owner}/${g.repo}/git/trees`;
+  const getTree = async (ref, recursive) => JSON.parse((await safeFetch(`${trees}/${encodeURIComponent(ref)}${recursive ? '?recursive=1' : ''}`, { ...opts, maxBytes: 8_000_000 })).text);
   const prefix = g.path ? g.path.replace(/\/$/, '') : '';
-  const files = (tree.tree || [])
-    .filter((t) => t.type === 'blob' && (!prefix || t.path === prefix || t.path.startsWith(prefix + '/')))
+  let entries;
+  if (prefix) {
+    // Walk down to the folder one level at a time, so a huge monorepo's full tree is never fetched.
+    let sha = g.ref;
+    const parts = prefix.split('/');
+    for (const [i, part] of parts.entries()) {
+      const level = await getTree(sha, false);
+      const hit = (level.tree || []).find((t) => t.path === part);
+      if (!hit) throw Object.assign(new Error('that folder was not found'), { code: 'no_path' });
+      if (hit.type === 'blob') { entries = [{ path: prefix, type: 'blob', size: hit.size || 0 }]; break; }
+      sha = hit.sha;
+      if (i === parts.length - 1) entries = ((await getTree(sha, true)).tree || []).map((t) => ({ ...t, path: `${prefix}/${t.path}` }));
+    }
+  } else {
+    entries = (await getTree(g.ref, true)).tree || [];
+  }
+  const files = entries
+    .filter((t) => t.type === 'blob')
     .filter((t) => TEXT_EXT.test(t.path) && !SKIP.test(t.path) && (t.size || 0) <= MAX_FILE_BYTES)
     // READMEs and source first, shallow paths first.
     .sort((a, b) => (/readme/i.test(b.path) - /readme/i.test(a.path)) || (a.path.split('/').length - b.path.split('/').length))
