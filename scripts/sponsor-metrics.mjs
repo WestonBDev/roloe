@@ -21,9 +21,9 @@ if (config.esUrl && (config.esApiKey || config.esPassword)) {
   const auth = config.esApiKey ? `ApiKey ${config.esApiKey}` : 'Basic ' + Buffer.from(`${config.esUser}:${config.esPassword}`).toString('base64');
   const es = async (path, body) => (await fetch(config.esUrl.replace(/\/$/, '') + path, { method: 'POST', headers: { authorization: auth, 'content-type': 'application/json' }, body: JSON.stringify(body), signal: AbortSignal.timeout(15000) })).json();
   try {
-    const r = await es(`/${opt.index}/_search`, { size: 0, track_total_hits: true, aggs: { cards: { filter: { prefix: { encounter_id: 'card:' } } }, meetings: { cardinality: { field: 'encounter_id' } } } });
+    const r = await es(`/${opt.index}/_search`, { size: 0, track_total_hits: true, aggs: { cards: { filter: { prefix: { encounter_id: 'card:' } } }, meetings: { filter: { bool: { must_not: { prefix: { encounter_id: 'card:' } } } }, aggs: { n: { cardinality: { field: 'encounter_id' } } } } } });
     out.elastic = { index: opt.index, passages_total: r.hits?.total?.value ?? NY, passages_on_cards: r.aggregations?.cards?.doc_count ?? NY,
-      open_meeting_scopes: r.aggregations ? Math.max(0, r.aggregations.meetings.value - (r.aggregations.cards.doc_count ? 1 : 0)) : NY,
+      open_meeting_scopes: r.aggregations?.meetings?.n?.value ?? NY,   // each card has its own card:<owner> scope, so count only the others (Gitar)
       retrieval: 'BM25 + semantic_text (.elser-2-elastic), rrf retriever', scope: 'coordinator encounter_id filter (Serverless refuses scoped keys from an API key)' };
   } catch { out.elastic = NY; }
 } else out.elastic = NY;
