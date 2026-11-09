@@ -169,6 +169,15 @@ export function elasticStore({ esUrl, esUser, esPassword, esApiKey, esIndex, fet
       keys.set(id, { encoded: null, encounter_id: enc, valid: true });
       return { id };
     },
+    // After a restart the key map is empty. Filter mode: a fresh handle with the same id.
+    // Minted keys can't be recovered (their secret was never stored), so mint a new one.
+    async flush() {},
+    async reattach(enc, keyId) {
+      const k = keys.get(keyId);
+      if (k?.valid) return { id: keyId };
+      if (mintRefused || String(keyId).startsWith('ck-')) { keys.set(keyId, { encoded: null, encounter_id: enc, valid: true }); return { id: keyId }; }
+      return this.createEncounterKey(enc);
+    },
     async invalidateKey(id) {
       const k = keys.get(id);
       if (k) k.valid = false;
