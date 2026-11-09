@@ -50,8 +50,8 @@ async function face(entry) {
   return '<p class="what">Still reading. Open the card to watch.</p>';
 }
 
-// Every card's words are fetched before the file is built, and never touched again: on a phone,
-// changing a card's content or shade after it is on the spindle left stale patches on screen.
+// Draw the file before requests finish. Each face is hydrated once as its own request resolves,
+// then reused on resize; turns only change card angles.
 let faces = [];
 
 const rolo = $('#rolo');
@@ -103,7 +103,7 @@ if (!wheel.length) {
   rolo.hidden = true;
   $('#empty').innerHTML = '<article class="card empty"><span class="tab">Empty</span><h2>No cards yet.</h2><p>Scan someone\'s Roloe, and they land here.</p></article>';
 } else {
-  faces = await Promise.all(wheel.map(face));
+  faces = wheel.map(() => '<p class="what">Loading card…</p>');
   build();
   $('#controls').hidden = wheel.length < 2;
   label();
@@ -138,6 +138,14 @@ if (!wheel.length) {
   };
   rolo.addEventListener('pointerup', release);
   rolo.addEventListener('pointercancel', () => { y0 = null; settle(); });
+
+  wheel.forEach((entry, i) => {
+    face(entry).then((html) => {
+      faces[i] = html;
+      const faceEl = leaves.find((l) => l.i === i)?.el.querySelector('.face');
+      if (faceEl) faceEl.innerHTML = html;
+    });
+  });
 }
 
 $('#sound').onclick = () => { soundOn = !soundOn; store.set('roloe.sound', soundOn); $('#sound').textContent = soundOn ? 'Sound on' : 'Sound off'; $('#sound').setAttribute('aria-pressed', String(soundOn)); };

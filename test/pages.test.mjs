@@ -92,7 +92,11 @@ test('phone pages: big targets, no leftover status dot, and your Roloe is a rota
     const js = await (await fetch(s.base + '/wheel.js')).text();
     assert.match(js, /angleFor/);
     assert.match(html, /prefers-reduced-motion: reduce\) \{ \.leaf \{ transition: none/, 'reduced motion: the file jumps instead of turning');
-    assert.ok(!/\.shade|innerHTML = html2/.test(js), 'nothing on a card changes after it is built: only its angle');
+    assert.match(js, /Loading card/, 'the file is drawn with loading faces before requests finish');
+    assert.match(js, /face\(entry\)\.then\(\(html\) =>/, 'each card face loads without waiting for the other requests');
+    assert.match(js, /faceEl\) faceEl\.innerHTML = html/, 'a card displays its face as soon as its own request finishes');
+    assert.doesNotMatch(js, /await Promise\.all\(wheel\.map\(face\)\)/, 'the page does not wait for the slowest card');
+    assert.ok(!/\.shade|innerHTML = html2/.test(js), 'after its face loads, turning only changes a card\'s angle');
     assert.match(html, /transition: transform 440ms/, 'a turn is a compositor transition, never a repaint per frame');
   } finally { await s.close(); }
 });
