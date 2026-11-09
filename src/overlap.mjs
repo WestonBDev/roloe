@@ -25,12 +25,21 @@ const queryText = (p) => tokens(p.text).join(' ');
 
 // For a guest, the direction flips: their material (one sentence, a page, a repo folder) is the query,
 // searched over the giver's whole card. A few searches, and "mine" is what answers them best.
-async function guestOverlap(store, keyId, { giver, recipient, theirsMax, mineMax, hybrid }) {
+// A source file a change can land in: a file, not docs.
+const CODE = /\.(m?[jt]sx?|cjs|cts|py|go|rs|rb|java|kt|swift|c|cc|cpp|h|hpp|cs|php|scala|ex|exs|sh)$/i;
+const isSource = (p) => p.kind === 'file' && CODE.test(p.source || '');   // code only: not docs, config or data (Gitar)
+const isTest = (p) => /(^|\/)(test|tests|__tests__|spec)(\/|\.)|\.(test|spec)\.[cm]?[jt]sx?$/i.test(p.source || '');
+
+async function guestOverlap(store, keyId, { giver, recipient, theirsMax, mineMax, hybrid, fileSlots }) {
   const theirsAll = await store.list(keyId, recipient);
-  const queries = theirsAll
-    .filter((p) => queryText(p))
-    .sort((a, b) => (b.speaker === 'owner') - (a.speaker === 'owner') || (/readme/i.test(b.source) - /readme/i.test(a.source)))
-    .slice(0, 12);
+  const usable = theirsAll.filter((p) => queryText(p));
+  // Their words and docs first, but always a few source passages too (code before tests,
+  // shallow paths first), so a long README can't crowd the code out.
+  const source = usable.filter(isSource).sort((a, b) => isTest(a) - isTest(b) || a.source.split('/').length - b.source.split('/').length);
+  const other = usable.filter((p) => !isSource(p))
+    .sort((a, b) => (b.speaker === 'owner') - (a.speaker === 'owner') || (/readme/i.test(b.source) - /readme/i.test(a.source)));
+  const srcQ = source.slice(0, Math.min(4, source.length));
+  const queries = [...other.slice(0, 12 - srcQ.length), ...srcQ];
   const results = queries.length ? await store.msearch(keyId, queries.map(queryText), { owner: giver, k: 6, hybrid }) : [];
   const fused = new Map();
   const credit = new Map();
@@ -45,12 +54,17 @@ async function guestOverlap(store, keyId, { giver, recipient, theirsMax, mineMax
   // matched it: what found matches first, then the rest (their own words before files).
   const hitIds = [...credit.entries()].sort((a, b) => b[1] - a[1]).map(([id]) => id);
   const rest = queries.map((q) => q.passage_id).filter((id) => !credit.has(id));
-  const theirs = [...hitIds, ...rest].slice(0, theirsMax);
+  const ranked = [...hitIds, ...rest];
+  // Reserve slots for source passages (matched ones first) so a finding can carry a change.
+  const srcIds = new Set(source.map((p) => p.passage_id));
+  const srcPick = [...ranked.filter((id) => srcIds.has(id)), ...source.map((p) => p.passage_id)]
+    .filter((id, i, a) => a.indexOf(id) === i).slice(0, fileSlots);
+  const theirs = [...ranked.filter((id) => !srcPick.includes(id)).slice(0, theirsMax - srcPick.length), ...srcPick];
   return { theirs, mine, counts: { queries: queries.length, searches: results.length, candidates: fused.size, theirs: theirs.length, mine: mine.length } };
 }
 
 export async function computeOverlap(store, keyId, { giver, recipient, theirsMax = 8, fileSlots = 3, mineMax = 8, hybrid = false, queriesFrom = 'giver' }) {
-  if (queriesFrom === 'recipient') return guestOverlap(store, keyId, { giver, recipient, theirsMax, mineMax, hybrid });
+  if (queriesFrom === 'recipient') return guestOverlap(store, keyId, { giver, recipient, theirsMax, mineMax, hybrid, fileSlots });
   const giverPassages = await store.list(keyId, giver);
   const queries = pickQueries(giverPassages).filter((p) => queryText(p));
   const results = queries.length ? await store.msearch(keyId, queries.map(queryText), { owner: recipient, k: 5, hybrid }) : [];

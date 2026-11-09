@@ -253,3 +253,25 @@ test('a guest meeting stopped (or failed) before it is built closes its trace (G
     srv.close();
   } finally { await s.close(); }
 });
+
+test('a runner only sweeps clones from its own coordinator, not another one serving the same owner name', async () => {
+  const { mkdirSync: mk, existsSync: ex, rmSync } = await import('node:fs');
+  const { homedir } = await import('node:os');
+  const { join } = await import('node:path');
+  const { runGuestTryOnce, cloneDirName } = await import('../src/guest-try.mjs');
+  const s = await startTestServer();
+  try {
+    await twoCards(s);
+    const mine = { url: s.base, key: s.keys.wes, owner: 'wes' };
+    const other = { url: 'https://other.example', key: 'x', owner: 'wes' };
+    const job = { encounter_id: 'e-0123456789', finding: 'f-0123abcd' };
+    const cache = join(homedir(), '.cache', 'roloe');
+    const theirs = join(cache, cloneDirName(other, job));
+    const stale = join(cache, cloneDirName(mine, job));
+    mk(theirs, { recursive: true }); mk(stale, { recursive: true });
+    await runGuestTryOnce(mine);
+    assert.ok(ex(theirs), 'the other coordinator\'s clone is left alone');
+    assert.ok(!ex(stale), 'its own stale clone is removed');
+    rmSync(theirs, { recursive: true, force: true });
+  } finally { await s.close(); }
+});

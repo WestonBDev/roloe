@@ -4,6 +4,7 @@
 // own tests in the same sandbox as Try it: deps from the lockfile with network, then tests with
 // --network none, read-only, no env, no home mount. The clone is deleted afterwards.
 import { mkdirSync, rmSync, existsSync, readdirSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
 import { execFile } from 'node:child_process';
@@ -27,11 +28,13 @@ export async function gitClone(job, dest) {
   if (job.path) await run('git', ['-C', dest, 'sparse-checkout', 'set', '--no-cone', `/${job.path}`, '/package.json', '/package-lock.json', '/pyproject.toml', '/requirements.txt'], { env, timeout: 60000 });
 }
 
-// Clone folders carry the owner, so a runner only ever cleans up its own owner's clones.
-const dirName = (owner, j) => `guest-${owner}-${j.encounter_id}-${j.finding}`;
+// Clone folders carry the owner and which coordinator, so a runner only ever cleans up its own
+// clones, even when another coordinator serves the same owner name on this laptop.
+const coordTag = (cfg) => createHash('sha256').update(String(cfg.url || '')).digest('hex').slice(0, 6);
+export const cloneDirName = (cfg, j) => `guest-${cfg.owner}-${coordTag(cfg)}-${j.encounter_id}-${j.finding}`;
 
-async function prepare(job, clone, owner) {
-  const dir = join(homedir(), '.cache', 'roloe', dirName(owner, job));
+async function prepare(job, clone, cfg) {
+  const dir = join(homedir(), '.cache', 'roloe', cloneDirName(cfg, job));
   rmSync(dir, { recursive: true, force: true });
   mkdirSync(join(dir, '..'), { recursive: true });
   await clone(job, dir);
@@ -59,8 +62,8 @@ export function makeRunner() {
     for (const [k, p] of prepared) if (!live.has(k) && !running.has(k)) { rmSync(p.dir, { recursive: true, force: true }); prepared.delete(k); }
     // Also clones on disk that no live job owns (left by a runner that restarted).
     const cache = join(homedir(), '.cache', 'roloe');
-    const liveDirs = new Set(jobs.map((j) => dirName(cfg.owner, j)));
-    const mine = new RegExp(`^guest-${cfg.owner}-e-[0-9a-f]{10}-f-[0-9a-f]{8}(-cache)?$`);
+    const liveDirs = new Set(jobs.map((j) => cloneDirName(cfg, j)));
+    const mine = new RegExp(`^guest-${cfg.owner}-${coordTag(cfg)}-e-[0-9a-f]{10}-f-[0-9a-f]{8}(-cache)?$`);
     if (existsSync(cache)) for (const d of readdirSync(cache)) if (mine.test(d) && !liveDirs.has(d.replace(/-cache$/, ''))) rmSync(join(cache, d), { recursive: true, force: true });
 
     for (const job of jobs) {
@@ -70,7 +73,7 @@ export function makeRunner() {
       try {
         if (job.state === 'diff-pending') {
           if (!(await post(job, { state: 'preparing' }))) continue;   // another runner claimed it
-          const p = await safePrepare(job, clone, cfg.owner);
+          const p = await safePrepare(job, clone, cfg);
           // Show the whole diff or nothing: a truncated diff is not the literal change.
           if (p.diff && p.diff.length > maxDiff) Object.assign(p, { state: 'did-not-apply', reason: 'This change is too large to show on a phone, so it is offered as advice only.', diff: '' });
           await post(job, { state: p.state, diff: p.diff, reason: p.reason, test_command: p.test_command });
@@ -81,7 +84,7 @@ export function makeRunner() {
         if (!(await post(job, { state: 'installing' }))) continue;
         let p = prepared.get(k);
         if (!p) {
-          p = await safePrepare(job, clone, cfg.owner);
+          p = await safePrepare(job, clone, cfg);
           if (p.state !== 'review') { await post(job, { state: 'failed', reason: p.reason || 'Could not prepare the change again.' }); if (p.dir) rmSync(p.dir, { recursive: true, force: true }); continue; }
         }
         if (job.approved_diff != null && p.diff !== job.approved_diff) {
@@ -115,8 +118,8 @@ export function makeRunner() {
   };
 }
 
-async function safePrepare(job, clone, owner) {
-  try { return await prepare(job, clone, owner); } catch (e) {
+async function safePrepare(job, clone, cfg) {
+  try { return await prepare(job, clone, cfg); } catch (e) {
     console.error('[roloe] guest try prepare failed:', e.code || e.name, String(e.stderr || e.message || '').slice(0, 200));
     return { state: 'did-not-apply', reason: e.code === 'bad_repo' ? 'Only public GitHub repos can be tried.' : 'Could not fetch the repo to try the change just now.', diff: '' };
   }
