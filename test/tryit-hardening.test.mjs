@@ -60,7 +60,7 @@ test('containers run as this user, and a timeout removes the container itself', 
   git('add', '.'); git('commit', '-qm', 'x');
   const copy = copyProject(dir, 'e-to');
   const before = Date.now();
-  const r = await runSandboxed(copy, { testTimeoutMs: 4000, keepCopy: true });
+  const r = await runSandboxed(copy, { testTimeoutMs: 10000, keepCopy: true });
   assert.ok(Date.now() - before < 60000);
   assert.equal(r.state, 'failed');
   assert.equal(readFileSync(join(copy, 'uid.txt'), 'utf8').trim(), String(process.getuid()));

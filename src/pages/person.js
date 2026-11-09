@@ -57,8 +57,33 @@ function waitSection(v) {
     ${n > 60 ? `<p class="muted" style="margin-top:6px">Still reading. ${esc(v.their_name)}'s assistant sometimes takes a little longer. This page updates by itself, and this link keeps working if you come back later.</p>` : ''}</div>`;
 }
 
+const diffLines = (d) => `<div class="diff" role="region" aria-label="the change, as a git diff" tabindex="0">${String(d || '').split('\n').map((l) => `<span class="${l.startsWith('+++') || l.startsWith('---') || l.startsWith('diff ') || l.startsWith('index ') ? 'meta' : l.startsWith('@@') ? 'hunk' : l.startsWith('+') ? 'add' : l.startsWith('-') ? 'del' : ''}">${esc(l) || ' '}</span>`).join('')}</div>`;
+
+// A guest's Try it: prepared on the card owner's laptop, approved here, run there with no network.
+function tryBlock(f, v) {
+  const t = f.try;
+  if (!t) return '';
+  const who = esc(v.their_name);
+  const head = '<p class="label" style="margin:10px 0 6px">Try it on your repo</p>';
+  switch (t.state) {
+    case 'diff-pending': return `<div class="card">${head}<p class="state wait">Putting the change on a fresh copy of your public repo…</p></div>`;
+    case 'review': return `<div class="card">${head}${diffLines(t.diff)}
+      <p class="muted" style="font-size:14px;margin-top:8px">Runs on ${who}'s laptop in a sandbox: your public repo, this change, your tests (<code>${esc(t.test_command || 'tests')}</code>). Dependencies install first; then the network is cut. Nothing is pushed anywhere, and the copy is deleted after.</p>
+      <div class="row" style="margin-top:10px"><button data-approve="${esc(f.id)}">Approve and run my tests</button><button class="ghost" data-decline="${esc(f.id)}">No thanks</button></div></div>`;
+    case 'no-tests': return `<div class="card">${head}${diffLines(t.diff)}<p style="margin-top:8px"><b>No tests to run.</b> ${esc(t.reason || 'This project has no test command, so the change was not run.')} The change above is offered as is.</p></div>`;
+    case 'did-not-apply': return `<div class="card">${head}<p><b>The change didn't apply to your repo as it is now.</b> ${esc(t.reason || '')}</p><p class="muted">The finding still stands as advice.</p></div>`;
+    case 'approved': return `<div class="card">${head}<p class="state wait">Approved. Starting the sandbox on ${who}'s laptop…</p></div>`;
+    case 'installing': return `<div class="card">${head}<p class="state wait">Installing your dependencies from your lockfile (network on)…</p></div>`;
+    case 'testing': return `<div class="card">${head}<p class="state wait">Running your tests with no network…</p></div>`;
+    case 'passed': return `<div class="card">${head}<p class="state ok">${t.passed} of your tests passed with this change, in ${((t.test_ms || 0) / 1000).toFixed(1)} s, with no network.</p><p class="muted">Nothing was pushed. Copy the change from the diff if you want it.</p></div>`;
+    case 'failed': return `<div class="card">${head}<p class="state bad">${t.reason ? esc(t.reason) : `${t.failed ?? '?'} failed, ${t.passed ?? 0} passed.`}</p><p class="muted">Your repo is unchanged.</p></div>`;
+    case 'declined': return `<div class="card">${head}<p>Declined. Nothing was run.</p></div>`;
+    default: return '';
+  }
+}
+
 function findingsSection(v) {
-  if (v.findings.length) return v.findings.map((f, i) => findingCard(f, v.their_name, { index: i, flip: !v.guest })).join('');
+  if (v.findings.length) return v.findings.map((f, i) => findingCard(f, v.their_name, { index: i, flip: !v.guest }) + (v.guest ? tryBlock(f, v) : '')).join('');
   if (v.their_side.posted && v.their_side.nothing_strong) {
     return `<article class="card deal"><span class="tab">${esc(v.their_name)}</span><h2>Nothing strong this time.</h2>
       <p>${esc(v.their_name)}'s assistant read the overlap and found nothing worth your time. That's an honest answer, not an error.</p></article>`;
@@ -120,7 +145,7 @@ function render(v) {
   if (draw.seal(sealSection(v))) wireSeal(v);
   draw.wait(waitSection(v));
   $('#stack-edges').hidden = !v.findings.length;
-  if (draw.findings(findingsSection(v))) wireTurns($('#findings'));
+  if (draw.findings(findingsSection(v))) { wireTurns($('#findings')); wireTry(); }
   draw.expect(expectSection(v));
   draw.thanks(thanksSection(v));
   if (draw.guest(guestSection(v))) wireProbe();
@@ -140,6 +165,17 @@ function wireSeal(v) {
     refresh();
   };
   $('#skip').onclick = async () => { await api(`/api/e/${id}/seal`, { method: 'POST', key, body: { skipped: true } }).catch(showErr); refresh(); };
+}
+
+function wireTry() {
+  document.querySelectorAll('[data-approve],[data-decline]').forEach((b) => {
+    b.onclick = async () => {
+      b.disabled = true;
+      const finding = b.dataset.approve || b.dataset.decline;
+      await api(`/api/e/${id}/try-approve`, { method: 'POST', key, body: { finding, decline: Boolean(b.dataset.decline) } }).catch(showErr);
+      refresh();
+    };
+  });
 }
 
 function wireProbe() {

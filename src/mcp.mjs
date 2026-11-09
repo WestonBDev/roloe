@@ -138,7 +138,16 @@ export async function runMcp() {
   const refreshMs = Number(process.env.ROLOE_REFRESH_MS ?? 120000);
   const refresh = refreshMs > 0 ? setInterval(() => refreshCard(loadConfig(cfg.owner)).catch(() => {}), refreshMs) : null;
 
-  const exit = () => { clearInterval(poll); if (refresh) clearInterval(refresh); process.exit(0); };
+  // Guest Try it: this laptop prepares the diff on a guest's public repo and, once they approve on
+  // their phone, runs their tests in the sandbox. Off with ROLOE_GUEST_TRY=off.
+  let guestBusy = false;
+  const guestTry = process.env.ROLOE_GUEST_TRY === 'off' ? null : setInterval(async () => {
+    if (guestBusy) return;
+    guestBusy = true;
+    try { const { runGuestTryOnce } = await import('./guest-try.mjs'); await runGuestTryOnce(loadConfig(cfg.owner)); } catch { /* next tick */ } finally { guestBusy = false; }
+  }, Number(process.env.ROLOE_GUEST_TRY_MS || 2500));
+
+  const exit = () => { clearInterval(poll); if (refresh) clearInterval(refresh); if (guestTry) clearInterval(guestTry); import('./guest-try.mjs').then((m) => m.cleanupGuestTries()).catch(() => {}).finally(() => process.exit(0)); };
   process.stdin.on('close', exit);
   process.stdin.on('end', exit);
 }
