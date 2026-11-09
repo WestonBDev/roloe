@@ -21,6 +21,7 @@ export const config = {
   esUrl: process.env.ELASTIC_URL || process.env.ES_URL || '',
   esUser: process.env.ELASTIC_URL ? (process.env.ELASTIC_USER || 'elastic') : (process.env.ES_USER || 'elastic'),
   esPassword: process.env.ELASTIC_URL ? (process.env.ELASTIC_PASSWORD || '') : (process.env.ES_PASSWORD || ''),
+  esApiKey: process.env.ELASTIC_URL ? (process.env.ELASTIC_API_KEY || '') : '',
   esIndex: process.env.ES_INDEX || 'roloe-passages',
   otlpEndpoint: process.env.OTEL_EXPORTER_OTLP_ENDPOINT || '',
   dash0Token: process.env.DASH0_AUTH_TOKEN || '',
