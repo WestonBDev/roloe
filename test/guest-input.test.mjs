@@ -35,7 +35,7 @@ function tarball(files) {
   const root = mkdtempSync(join(tmpdir(), 'roloe-tgz-'));
   const top = join(root, 'repo-abc123');
   for (const [f, t] of Object.entries(files)) { mkdirSync(dirname(join(top, f)), { recursive: true }); writeFileSync(join(top, f), t); }
-  return readFileSync(execFileSync('sh', ['-c', `tar -czf "${root}/x.tgz" -C "${root}" repo-abc123 && echo "${root}/x.tgz"`], { encoding: 'utf8' }).trim());
+  return readFileSync(execFileSync("sh", ["-c", `COPYFILE_DISABLE=1 tar -czf "${root}/x.tgz" -C "${root}" repo-abc123 && echo "${root}/x.tgz"`], { encoding: 'utf8' }).trim());
 }
 const tgzFetch = (bytes, calls = []) => Object.assign(async (url) => { calls.push(String(url)); return /codeload\.github\.com/.test(String(url)) ? new Response(bytes, { status: 200, headers: { 'content-type': 'application/x-gzip' } }) : new Response('no', { status: 404 }); }, { calls });
 
@@ -100,3 +100,19 @@ test('never fetches private or local addresses, and a failed fetch is reported, 
   assert.ok(down.error);
 });
 
+
+test('a tarball that stalls never crashes anything, and a deep monorepo folder falls back to walking the tree', async () => {
+  // A body that never finishes: the reader must give up cleanly at its deadline.
+  const stall = async (url) => {
+    if (/codeload/.test(String(url))) return new Response(new ReadableStream({ start() {} }), { status: 200 });
+    if (/git\/trees\/main$/.test(String(url))) return new Response(JSON.stringify({ tree: [{ path: 'packages', type: 'tree', sha: 'pk' }] }), { status: 200 });
+    if (/git\/trees\/pk$/.test(String(url))) return new Response(JSON.stringify({ tree: [{ path: 'api', type: 'tree', sha: 'ap' }] }), { status: 200 });
+    if (/git\/trees\/ap\?recursive=1$/.test(String(url))) return new Response(JSON.stringify({ tree: [{ path: 'index.js', type: 'blob', size: 40 }] }), { status: 200 });
+    if (/raw\.githubusercontent\.com\/acme\/huge\/main\/packages\/api\/index\.js$/.test(String(url))) return new Response('export const retryWithBackoff = () => 1;\n', { status: 200 });
+    return new Response('no', { status: 404 });
+  };
+  const t0 = Date.now();
+  const r = await readGuestInput({ link: 'https://github.com/acme/huge/tree/main/packages/api' }, { fetchImpl: stall, lookup: publicDns, timeoutMs: 3000 });
+  assert.ok(Date.now() - t0 < 6000);
+  assert.deepEqual(r.passages.map((p) => p.source), ['packages/api/index.js']);
+});

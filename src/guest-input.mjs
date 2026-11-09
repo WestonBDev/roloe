@@ -81,47 +81,89 @@ function chunkLines(text, source, kind, ts) {
   return out;
 }
 
+// Stream GitHub's tarball (codeload: no API rate limit), keep only the wanted folder's text files.
+// Stops at a byte cap, so a huge monorepo can't stall a guest's scan.
+const MAX_TARBALL_BYTES = 60_000_000;
 async function readGithub(g, opts) {
-  const trees = `https://api.github.com/repos/${g.owner}/${g.repo}/git/trees`;
-  const getTree = async (ref, recursive) => JSON.parse((await safeFetch(`${trees}/${encodeURIComponent(ref)}${recursive ? '?recursive=1' : ''}`, { ...opts, maxBytes: 8_000_000 })).text);
+  const url = `https://codeload.github.com/${g.owner}/${g.repo}/tar.gz/${encodeURIComponent(g.ref === 'HEAD' ? 'HEAD' : g.ref)}`;
+  const u = new URL(url);
+  const addrs = await opts.lookup(u.hostname, { all: true });
+  if (!addrs.length || !addrs.every((a) => isPublicAddress(a.address))) throw Object.assign(new Error('not public'), { code: 'not_public' });
+  const res = await opts.fetchImpl(url, { signal: AbortSignal.timeout(Math.max(500, opts.deadline - Date.now())), headers: { 'user-agent': 'roloe-guest-reader' } });
+  if (!res.ok || !res.body) throw Object.assign(new Error(`GitHub answered ${res.status}`), { code: `http_${res.status}` });
   const prefix = g.path ? g.path.replace(/\/$/, '') : '';
-  let entries;
-  if (prefix) {
-    // Walk down to the folder one level at a time, so a huge monorepo's full tree is never fetched.
-    let sha = g.ref;
-    const parts = prefix.split('/');
-    for (const [i, part] of parts.entries()) {
-      const level = await getTree(sha, false);
-      const hit = (level.tree || []).find((t) => t.path === part);
-      if (!hit) throw Object.assign(new Error('that folder was not found'), { code: 'no_path' });
-      if (hit.type === 'blob') { entries = [{ path: prefix, type: 'blob', size: hit.size || 0 }]; break; }
-      sha = hit.sha;
-      if (i === parts.length - 1) entries = ((await getTree(sha, true)).tree || []).map((t) => ({ ...t, path: `${prefix}/${t.path}` }));
-    }
-  } else {
-    entries = (await getTree(g.ref, true)).tree || [];
-  }
-  const files = entries
-    .filter((t) => t.type === 'blob')
-    .filter((t) => TEXT_EXT.test(t.path) && !SKIP.test(t.path) && (t.size || 0) <= MAX_FILE_BYTES)
-    // READMEs and source first, shallow paths first.
-    .sort((a, b) => (/readme/i.test(b.path) - /readme/i.test(a.path)) || (a.path.split('/').length - b.path.split('/').length))
-    .slice(0, MAX_FILES);
+  const wanted = (path, size) => (!prefix || path === prefix || path.startsWith(prefix + '/')) && TEXT_EXT.test(path) && !SKIP.test(path) && size <= MAX_FILE_BYTES;
+  const candidates = [];
+  let candidateBytes = 0;
+  await untar(res.body, {
+    maxBytes: MAX_TARBALL_BYTES,
+    deadline: opts.deadline,
+    onFile(path, size) { return wanted(path, size) && candidateBytes < 3_000_000 && candidates.length < 400; },
+    file(path, buf) { candidates.push({ path, text: buf.toString('utf8') }); candidateBytes += buf.length; },
+  });
+  // READMEs first, then shallow paths, then the rest.
+  candidates.sort((a, b) => (/readme/i.test(b.path) - /readme/i.test(a.path)) || (a.path.split('/').length - b.path.split('/').length) || a.path.localeCompare(b.path));
+  const files = candidates.slice(0, MAX_FILES);
   const passages = [];
   let total = 0;
-  const removed = [];
+  let removed = 0;
   const ts = new Date().toISOString();
   for (const f of files) {
-    if (total > MAX_TOTAL_BYTES || Date.now() > opts.deadline) break;
-    const raw = `https://raw.githubusercontent.com/${g.owner}/${g.repo}/${encodeURIComponent(g.ref)}/${f.path.split('/').map(encodeURIComponent).join('/')}`;
-    let text;
-    try { text = (await safeFetch(raw, { ...opts, maxBytes: MAX_FILE_BYTES })).text; } catch { continue; }
-    total += text.length;
-    const s = scrub(text);
-    removed.push(...s.removed);
-    passages.push(...chunkLines(s.text, f.path, 'file', ts));
+    if (total > MAX_TOTAL_BYTES) break;
+    total += f.text.length;
+    const sc = scrub(f.text);
+    removed += sc.removed.length;
+    passages.push(...chunkLines(sc.text, f.path, 'file', ts));
   }
-  return { passages: passages.slice(0, 120), files: files.length, removed: removed.length, repo: `https://github.com/${g.owner}/${g.repo}`, ref: g.ref, path: g.path };
+  if (prefix && !candidates.length) throw Object.assign(new Error('that folder was not found or has no readable files'), { code: 'no_path' });
+  return { passages: passages.slice(0, 120), files: files.length, removed, repo: `https://github.com/${g.owner}/${g.repo}`, ref: g.ref, path: g.path };
+}
+
+// A minimal streaming tar reader (ustar + pax path headers) over a gzip stream.
+async function untar(webStream, { maxBytes, deadline, onFile, file }) {
+  const { createGunzip } = await import('node:zlib');
+  const { Readable } = await import('node:stream');
+  const gunzip = Readable.fromWeb(webStream).pipe(createGunzip());
+  let buf = Buffer.alloc(0);
+  let seen = 0;
+  let entry = null;     // the current entry: { path, size, toRead (size + padding), keep, pax, chunks }
+  let paxPath = null;
+  const octal = (b) => parseInt(b.toString('ascii').replace(/\0.*$/s, '').trim() || '0', 8);
+  const strip = (p) => p.split('/').slice(1).join('/');   // drop the "<repo>-<sha>/" top folder
+  for await (const chunk of gunzip) {
+    seen += chunk.length;
+    if (seen > maxBytes || Date.now() > deadline) { gunzip.destroy(); break; }
+    buf = buf.length ? Buffer.concat([buf, chunk]) : chunk;
+    for (;;) {
+      if (entry) {
+        const take = Math.min(entry.toRead, buf.length);
+        const dataLeft = Math.max(0, entry.size - entry.got);
+        if ((entry.keep || entry.pax) && dataLeft) entry.chunks.push(buf.subarray(0, Math.min(take, dataLeft)));
+        entry.got += take;
+        entry.toRead -= take;
+        buf = buf.subarray(take);
+        if (entry.toRead > 0) break;
+        const body = Buffer.concat(entry.chunks);
+        if (entry.pax) { const m = body.toString('utf8').match(/\d+ path=([^\n]*)\n/); if (m) paxPath = m[1]; }
+        else if (entry.keep) file(entry.path, body);
+        entry = null;
+        continue;
+      }
+      if (buf.length < 512) break;
+      const h = buf.subarray(0, 512);
+      buf = buf.subarray(512);
+      if (h.every((x) => x === 0)) continue;
+      const name = h.subarray(0, 100).toString('utf8').replace(/\0.*$/s, '');
+      const pre = h.subarray(345, 500).toString('utf8').replace(/\0.*$/s, '');
+      const size = octal(h.subarray(124, 136));
+      const type = String.fromCharCode(h[156] || 48);
+      const path = strip(paxPath || (pre ? `${pre}/${name}` : name));
+      if (type !== 'x') paxPath = null;
+      const isFile = type === '0' || type === '\0';
+      const keep = isFile && Boolean(path) && !/(^|\/)\._/.test(path) && onFile(path, size);
+      entry = { path, size, got: 0, toRead: size + ((512 - (size % 512)) % 512), keep, pax: type === 'x', chunks: [] };
+    }
+  }
 }
 
 async function readPage(p, opts) {
