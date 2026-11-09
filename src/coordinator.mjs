@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { config } from './env.mjs';
 import { router, send, readJson, bearer, HttpError } from './http.mjs';
 import { state, load, save, saveNow, sha256, newKey, sameHash, cleanOwnerId, cleanName, cleanLine } from './state.mjs';
-import { otlpOn, traceFile, flush } from './telemetry.mjs';
+import { otlpOn, traceFile, logFile, flush } from './telemetry.mjs';
 import { record, flushMetrics } from './metrics.mjs';
 import { syncMeeting } from './meeting-record.mjs';
 const traceFileRef = traceFile;
@@ -760,30 +760,34 @@ export function buildApp({ store, guestReader = readGuestInput, guestReadTimeout
   return r;
 }
 
-// Canary scan of exported telemetry, incremental: only bytes added since the last scan are read.
-// A newly registered canary restarts the scan from the beginning.
-const scanState = { offset: 0, hits: 0, tail: '', canaries: '' };
+// Canary scan of exported telemetry (spans and logs), incremental: only bytes added to each file
+// since the last scan are read. A newly registered canary restarts the scan from the beginning.
+const scanState = { canaries: '', files: new Map() };   // file -> { offset, hits, tail }
+function scanFile(file) {
+  const st = scanState.files.get(file) || { offset: 0, hits: 0, tail: '' };
+  scanState.files.set(file, st);
+  if (!existsSync(file)) return 0;
+  const size = statSync(file).size;
+  if (size < st.offset) Object.assign(st, { offset: 0, hits: 0, tail: '' });
+  if (size <= st.offset) return 0;
+  const fd = openSync(file, 'r');
+  try {
+    const buf = Buffer.alloc(size - st.offset);
+    const read = readSync(fd, buf, 0, buf.length, st.offset);
+    const text = st.tail + buf.toString('utf8', 0, read);
+    for (const c of state.canaries) st.hits += text.split(c).length - 1 - (st.tail.split(c).length - 1);
+    st.tail = text.slice(-(Math.max(...state.canaries.map((c) => c.length)) - 1));
+    st.offset += read;
+    return read;
+  } finally { closeSync(fd); }
+}
 function scanTelemetry() {
   const key = state.canaries.join('\n');
-  if (key !== scanState.canaries) Object.assign(scanState, { offset: 0, hits: 0, tail: '', canaries: key });
+  if (key !== scanState.canaries) Object.assign(scanState, { canaries: key, files: new Map() });
   let read = 0;
-  if (state.canaries.length && existsSync(traceFileRef)) {
-    const size = statSync(traceFileRef).size;
-    if (size < scanState.offset) Object.assign(scanState, { offset: 0, hits: 0, tail: '' });
-    if (size > scanState.offset) {
-      const fd = openSync(traceFileRef, 'r');
-      try {
-        const buf = Buffer.alloc(size - scanState.offset);
-        read = readSync(fd, buf, 0, buf.length, scanState.offset);
-        const text = scanState.tail + buf.toString('utf8', 0, read);
-        for (const c of state.canaries) scanState.hits += text.split(c).length - 1 - (scanState.tail.split(c).length - 1);
-        const keep = Math.max(...state.canaries.map((c) => c.length)) - 1;
-        scanState.tail = text.slice(-keep);
-        scanState.offset += read;
-      } finally { closeSync(fd); }
-    }
-  }
-  return { hits: scanState.hits, read, offset: scanState.offset };
+  if (state.canaries.length) for (const f of [traceFileRef, logFile]) read += scanFile(f);
+  const all = [...scanState.files.values()];
+  return { hits: all.reduce((n, x) => n + x.hits, 0), read, offset: all.reduce((n, x) => n + x.offset, 0) };
 }
 
 const median = (xs) => { const v = xs.filter((x) => Number.isFinite(x)).sort((a, b) => a - b); if (!v.length) return null; const m = Math.floor(v.length / 2); return v.length % 2 ? v[m] : (v[m - 1] + v[m]) / 2; };
