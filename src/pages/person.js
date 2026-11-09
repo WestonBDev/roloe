@@ -71,7 +71,7 @@ function tryBlock(f, v) {
   switch (t.state) {
     case 'diff-pending': return `<div class="card">${head}<p class="state wait">Putting the change on a copy of your repo…</p></div>`;
     case 'review': return `<div class="card">${head}${diffLines(t.diff)}
-      <p class="cite" style="margin-top:10px">deps install (network on) · then ${esc(t.test_command || 'your tests')} · no network · nothing pushed</p>
+      <p class="cite" style="margin-top:10px">deps install from your lockfile (network on) · then ${esc(t.test_command || 'your tests')} with no network · nothing pushed</p>
       <button class="wide" style="margin-top:12px" data-approve="${esc(f.id)}">Approve and run my tests</button>
       <button class="ghost wide quiet" style="margin-top:6px" data-decline="${esc(f.id)}">No thanks</button></div>`;
     case 'no-tests': return `<div class="card">${head}${diffLines(t.diff)}<p style="margin-top:8px"><b>No tests to run.</b> ${esc(t.reason || 'This project has no test command, so the change was not run.')}</p></div>`;
