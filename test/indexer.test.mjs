@@ -86,3 +86,18 @@ test('passage IDs are stable while the text is unchanged', () => {
   assert.match(passageId('w', 'README.md:L1-4', 'x'), /^p-[0-9a-f]{6}$/);
   assert.notEqual(passageId('w', 'L', 'one text'), passageId('w', 'L', 'two text'));
 });
+
+test('a private key that crosses a chunk boundary is removed whole (Gitar)', async () => {
+  const { writeFileSync } = await import('node:fs');
+  const body = Array.from({ length: 30 }, (_, i) => 'MIIEow' + String(i).padStart(2, '0') + 'QwErTy'.repeat(10)).join('\n');
+  const pem = `-----BEGIN RSA PRIVATE KEY-----\n${body}\n-----END RSA PRIVATE KEY-----`;
+  const lines = Array.from({ length: 35 }, (_, i) => `filler line ${i} about retries`).join('\n');
+  writeFileSync(join(project, 'keys.md'), `${lines}\n${pem}\nafter\n`);
+  git('add', '.'); git('commit', '-qm', 'add keys doc');
+  const sessionLines = [{ type: 'user', timestamp: new Date().toISOString(), message: { content: 'x'.repeat(1400) + '\n' + pem } }];
+  writeFileSync(join(claudeDir, 'pem00000-0000-0000-0000-000000000000.jsonl'), sessionLines.map((l) => JSON.stringify(l)).join('\n'));
+  const { passages } = buildCard({ owner: 'w', projectDir: project });
+  const all = JSON.stringify(passages);
+  assert.ok(!all.includes('QwErTyQwErTy'), 'no key body in any passage');
+  assert.ok(!all.includes('PRIVATE KEY-----'), 'no key armor in any passage');
+});

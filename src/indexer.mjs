@@ -137,16 +137,19 @@ export function listProjectFiles(projectDir) {
   } catch { return []; }
 }
 
-export function readFiles(projectDir) {
+export function readFiles(projectDir, removed = []) {
   const out = [];
   for (const rel of listProjectFiles(projectDir)) {
     if (SKIP_FILE.test(rel) || !TEXT_EXT.has(extname(rel).toLowerCase())) continue;
     const path = join(projectDir, rel);
     let st; try { st = statSync(path); } catch { continue; }
     if (!st.isFile() || st.size > 200_000 || st.size === 0) continue;
-    const text = readFileSync(path, 'utf8');
-    if (text.includes('\u0000')) continue;
-    const lines = text.split('\n');
+    const raw = readFileSync(path, 'utf8');
+    if (raw.includes('\u0000')) continue;
+    // Scrub the whole file first: a secret that crosses a window boundary is removed whole.
+    const sc = scrub(raw);
+    removed.push(...sc.removed);
+    const lines = sc.text.split('\n');
     for (let start = 0; start < lines.length; start += 50) {
       const body = lines.slice(start, start + 50).join('\n').slice(0, MAX_TEXT);
       if (body.trim().length < 20) continue;
@@ -169,18 +172,21 @@ export function readCommits(projectDir, n = 25) {
 export function buildCard({ owner, projectDir, since = startOfToday(), sessions = true }) {
   const dir = resolve(projectDir);
   const raw = [];
+  const removed = [];
   if (sessions) {
     for (const m of [...readClaudeSessions(dir, since), ...readCodexSessions(dir, since)]) {
-      chunks(m.text).forEach((t, j) => raw.push({
+      // Scrub the whole message before chunking, for the same reason.
+      const sc = scrub(m.text);
+      removed.push(...sc.removed);
+      chunks(sc.text).forEach((t, j) => raw.push({
         kind: 'session', speaker: m.speaker, via: m.via, source: `session ${m.session}`,
         locator: `session ${m.session} #${m.n}${j ? '.' + j : ''}`, ts: m.ts, text: t,
       }));
     }
   }
   raw.push(...readCommits(dir));
-  raw.push(...readFiles(dir));
+  raw.push(...readFiles(dir, removed));
 
-  const removed = [];
   const passages = [];
   const seen = new Set();
   // Newest sessions first, then commits, then files: when the cap bites, old file chunks go first.
