@@ -77,3 +77,23 @@ test('for a guest, their material is the query: a few searches over the giver\'s
   assert.ok(!o.mine.includes('p-a00002'));
   assert.deepEqual(o.theirs, ['p-b00001']);
 });
+
+test('a guest repo with a long README still puts its source files in "theirs", so a change is possible', async () => {
+  const store = memoryStore();
+  await store.init();
+  await store.replaceCard('wes', 'Wes', [P('p-a00001', 'retry loops need a finite overall deadline or they spin forever on a flaky network')]);
+  await store.copyCardsToEncounter('e-r', ['wes']);
+  const F = (id, source, text) => ({ passage_id: id, kind: 'file', speaker: '', source, locator: `${source}:L1-50`, ts: new Date().toISOString(), text, via: '' });
+  const guest = [];
+  for (let i = 0; i < 20; i++) guest.push(F(`p-b${String(i).padStart(5, '0')}`, 'readme.md', `retry options ${i}: retries, factor, minTimeout, maxRetryTime deadline for a flaky network`));
+  guest.push(F('p-c00001', 'index.js', 'export default async function pRetry(input, options) { const operation = retry.operation(options); }'));
+  guest.push(F('p-c00002', 'test.js', 'test("retries", async t => { t.is(await pRetry(fn), 1); });'));
+  guest.push(F('p-c00003', 'docs/usage.md', 'how to use retries in your app'));
+  await store.addToEncounter('e-r', 'guest-1', 'Guest', guest);
+  const { id } = await store.createEncounterKey('e-r');
+  const o = await computeOverlap(store, id, { giver: 'wes', recipient: 'guest-1', queriesFrom: 'recipient' });
+  assert.ok(o.theirs.includes('p-c00001'), `index.js is offered: ${o.theirs}`);
+  assert.ok(o.theirs.length <= 8);
+  assert.ok(o.theirs.some((x) => x.startsWith('p-b')), 'the README still counts');
+  assert.ok(!o.theirs.includes('p-c00003') || o.theirs.indexOf('p-c00001') < o.theirs.indexOf('p-c00003'), 'source before docs');
+});
