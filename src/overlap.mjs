@@ -26,7 +26,8 @@ const queryText = (p) => tokens(p.text).join(' ');
 // For a guest, the direction flips: their material (one sentence, a page, a repo folder) is the query,
 // searched over the giver's whole card. A few searches, and "mine" is what answers them best.
 // A source file a change can land in: a file, not docs.
-const isSource = (p) => p.kind === 'file' && !/(^|\/)(readme|changelog|license|contributing)[^/]*$|\.(md|mdx|markdown|txt|rst|adoc)$/i.test(p.source || '');
+const CODE = /\.(m?[jt]sx?|cjs|cts|py|go|rs|rb|java|kt|swift|c|cc|cpp|h|hpp|cs|php|scala|ex|exs|sh)$/i;
+const isSource = (p) => p.kind === 'file' && CODE.test(p.source || '');   // code only: not docs, config or data (Gitar)
 const isTest = (p) => /(^|\/)(test|tests|__tests__|spec)(\/|\.)|\.(test|spec)\.[cm]?[jt]sx?$/i.test(p.source || '');
 
 async function guestOverlap(store, keyId, { giver, recipient, theirsMax, mineMax, hybrid, fileSlots }) {
