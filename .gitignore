@@ -2,5 +2,6 @@ node_modules/
 .env
 *.log
 data/
+data-*/
 .roloe/
 coverage/
