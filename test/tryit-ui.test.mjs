@@ -78,7 +78,7 @@ test('Try it page: a finding without a change says so; Docker down or a broken r
     const { body: { id } } = await s.call('POST', '/api/tap', { to: 'ray' }, giver.auth);
     await s.call('POST', `/api/e/${id}/findings`, { findings: [
       { cites: 'p-a00001', quote: 'keep the package manifest', what: 'advice only' },
-      { cites: 'p-a00001', quote: 'valid json always', what: 'breaks the manifest', change: { edits: [{ file: 'package.json', find: '{', replace: '{{' }] } },
+      { cites: 'p-a00001', quote: 'valid json always', what: 'breaks the manifest', change: { edits: [{ file: 'package.json', find: '{"name"', replace: '{{"name"' }] } },
     ] }, giver.auth);
     const f = s.state().encounters[id].findings;
     await assert.rejects(startTryUi({ cfg: { url: s.base, key: me.key, owner: 'ray', project: dir }, encounterId: id, findingId: f[0].id, port: 0 }), /no change/);

@@ -359,7 +359,7 @@ export function buildApp({ store }) {
     if (!TRY_STATES.has(b.state)) throw new HttpError(400, 'bad_state', 'Unknown state');
     const num = (v) => (Number.isFinite(+v) && v !== null && v !== undefined ? Math.max(0, Math.round(+v)) : null);
     const now = Date.now();
-    enc.tryStatus = { finding: f.id, state: b.state, passed: num(b.passed), failed: num(b.failed), test_ms: num(b.test_ms), sandbox: cleanLine(b.sandbox || '', 80), at: now };
+    enc.tryStatus = { finding: f.id, state: b.state, passed: num(b.passed), failed: num(b.failed), test_ms: num(b.test_ms), sandbox: b.sandbox === 'docker-network-none' ? 'docker-network-none' : 'other', at: now };
     if (['passed', 'failed', 'declined', 'did-not-apply'].includes(b.state)) {
       await step('roloe.try', ref(enc), {
         'roloe.try.state': b.state, 'roloe.try.approved': !['declined', 'did-not-apply'].includes(b.state),

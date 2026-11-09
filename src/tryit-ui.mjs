@@ -78,7 +78,8 @@ async function poll() {
 export async function startTryUi({ cfg, encounterId, findingId, port = 7421 }) {
   const forMe = await api(cfg, 'GET', `/api/e/${encounterId}/for-me`);
   const finding = forMe.findings.find((f) => (findingId ? f.id === findingId : f.change)) || null;
-  if (!finding) throw new Error(forMe.findings.length ? 'None of the findings carries a change to try.' : 'No findings for you yet.');
+  if (!finding) throw new Error(findingId ? 'No finding with that id.' : forMe.findings.length ? 'None of the findings carries a change to try.' : 'No findings for you yet.');
+  if (!finding.change?.edits?.length) throw new Error('This finding carries no change to try; it stands as advice.');
   const report = (state, extra = {}) => api(cfg, 'POST', `/api/e/${encounterId}/try`, { finding: finding.id, state, ...extra }).catch(() => {});
 
   const status = { state: 'review', output: '' };
@@ -93,6 +94,8 @@ export async function startTryUi({ cfg, encounterId, findingId, port = 7421 }) {
     diff = literalDiff(copy);
     await report('review');
   }
+  // If the page is abandoned (Ctrl-C), the throwaway copy still goes.
+  process.once('exit', () => { if (copy) rmSync(copy, { recursive: true, force: true }); });
   let resolveDone;
   const done = new Promise((r) => { resolveDone = r; });
   if (!applied.ok) resolveDone({ state: 'did-not-apply', reason: applied.reason });
@@ -109,14 +112,23 @@ export async function startTryUi({ cfg, encounterId, findingId, port = 7421 }) {
     if (req.method === 'POST' && req.url === '/approve' && status.state === 'review' && copy) {
       status.state = 'installing';
       json(202, { state: status.state });
-      if (!dockerAvailable()) { status.state = 'failed'; status.reason = 'Docker is not running on this laptop'; await report('failed'); return resolveDone(status); }
-      const r = await runSandboxed(copy, {
-        onState: (st) => { status.state = st; if (st === 'installing' || st === 'testing') report(st); },
-        onOutput: (d) => { status.output += d; },
-      });
+      if (!dockerAvailable()) {
+        rmSync(copy, { recursive: true, force: true }); copy = null;
+        status.state = 'failed'; status.reason = 'Docker is not running on this laptop'; await report('failed'); return resolveDone(status);
+      }
+      let r;
+      try {
+        r = await runSandboxed(copy, {
+          onState: (st) => { status.state = st; if (st === 'installing' || st === 'testing') report(st); },
+          onOutput: (d) => { status.output += d; },
+        });
+      } catch (e) {
+        // runSandboxed already deleted the copy in its finally.
+        r = { state: 'failed', reason: `The run could not start: ${e.message}`.slice(0, 200), output: '' };
+      }
       copy = null;
       Object.assign(status, { state: r.state, passed: r.passed, failed: r.failed, test_ms: r.test_ms, reason: r.reason });
-      await report(r.state, { passed: r.passed, failed: r.failed, test_ms: r.test_ms, sandbox: 'docker --network none' });
+      await report(r.state, { passed: r.passed, failed: r.failed, test_ms: r.test_ms, sandbox: 'docker-network-none' });
       return resolveDone({ ...status, output: r.output });
     }
     if (req.method === 'POST' && req.url === '/decline' && status.state === 'review') {
