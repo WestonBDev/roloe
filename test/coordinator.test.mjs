@@ -7,7 +7,10 @@ import { startTestServer } from './helpers.mjs';
 test('health, register, rotate, and every route is traced without content', async () => {
   const s = await startTestServer();
   try {
-    assert.equal((await s.call('GET', '/healthz')).status, 200);
+    const h = await s.call('GET', '/healthz');
+    assert.equal(h.status, 200);
+    assert.equal(h.body.store, 'memory', 'healthz says which store and scope are live');
+    assert.ok(h.body.scope);
     const reg = await s.call('POST', '/api/owners', { owner: 'Weston', name: 'Weston <b>', line: 'Builds Roloe' });
     assert.equal(reg.status, 201);
     assert.equal(reg.body.owner, 'weston');
