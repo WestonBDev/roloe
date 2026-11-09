@@ -115,7 +115,7 @@ export function instructions(me, them, { guest = false, guestRepo = false } = {}
 
 const posting = new Set();
 
-export function buildApp({ store, guestReader = readGuestInput }) {
+export function buildApp({ store, guestReader = readGuestInput, guestReadTimeoutMs = 12000 }) {
   const r = router();
 
   r.add('GET', '/healthz', ({ res }) => send(res, 200, { ok: true, otlp: otlpOn }));
@@ -549,7 +549,11 @@ export function buildApp({ store, guestReader = readGuestInput }) {
     (async () => {
       try {
         const input = await step('roloe.guest_read', null, { 'roloe.guest.has_link': Boolean(link), 'roloe.guest.has_text': Boolean(b.text) }, async (sp) => {
-          const r = await guestReader({ link, text: b.text });
+          // A hard cap: whatever happens out there, the meeting opens.
+          let timer;
+          const late = new Promise((res) => { timer = setTimeout(() => res({ kind: b.text ? 'text' : 'none', passages: [], error: 'Couldn\'t read that link in time; the meeting goes on without it.', late: true }), guestReadTimeoutMs); });
+          const r = await Promise.race([guestReader({ link, text: b.text }), late]).finally(() => clearTimeout(timer));
+          if (r.late && b.text) Object.assign(r, await readGuestInput({ text: b.text }), { error: r.error });   // a sentence needs no fetching
           sp.setAttributes({ 'roloe.guest.kind': r.kind, 'roloe.guest.passages': r.passages.length, 'roloe.guest.read_ok': !r.error });
           return r;
         });
