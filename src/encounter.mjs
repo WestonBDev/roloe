@@ -83,7 +83,9 @@ async function buildEncounter(store, enc, ref, a, b, guest, guestPassages) {
   if (guest && guestPassages.length && enc.overlap[a.owner]?.mine?.length) {
     const ids = enc.overlap[a.owner].mine.slice(0, 3);
     const docs = await store.getMany(enc.keyId, ids);
-    const best = ids.map((pid) => docs.find((d) => d.passage_id === pid && d.owner_id === a.owner)).find(Boolean);
+    const ranked = ids.map((pid) => docs.find((d) => d.passage_id === pid && d.owner_id === a.owner)).filter(Boolean);
+    // Words read better than code on a phone: prefer prose among the top matches.
+    const best = ranked.find((d) => d.kind !== 'file') || ranked[0];
     if (best) {
       const text = bestExcerpt(best.text, new Set(guestPassages.flatMap((p) => tokens(p.text))));
       if (text && gate(text, state.canaries).ok) {
