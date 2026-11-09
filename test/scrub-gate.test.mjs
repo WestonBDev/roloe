@@ -28,7 +28,7 @@ test('scrubber removes each secret shape and keeps the value only in `removed`',
 
 test('scrubber removes private key blocks and assigned secret values', () => {
   const pem = '-----BEGIN RSA PRIVATE KEY-----\nMIIEow' + 'x'.repeat(40) + '\n-----END RSA PRIVATE KEY-----';
-  assert.equal(scrub(pem).text, '[removed: private key]');
+  assert.equal(scrub(pem).text.trim(), '[removed: private key]');
   const s = scrub('DB_PASSWORD=hunter2isNotGood9');
   assert.equal(s.text, 'DB_PASSWORD=[removed: secret value]');
 });
@@ -66,4 +66,12 @@ test('gate ignores plain-word "secrets" so project vocabulary never blocks', () 
   assert.equal(usableSecret('steam'), false);
   assert.equal(usableSecret('a@b.co'), true);
   assert.equal(gate('Wishlist and steam totals', ['wishlist', 'steam']).ok, true);
+});
+
+test('scrubbing keeps line numbers: a multi-line match leaves the same number of lines (Gitar)', () => {
+  const pem = '-----BEGIN RSA PRIVATE KEY-----\nMIIEow' + 'x'.repeat(40) + '\nabc\n-----END RSA PRIVATE KEY-----';
+  const text = `line one\n${pem}\nline after`;
+  const out = scrub(text).text;
+  assert.equal(out.split('\n').length, text.split('\n').length);
+  assert.equal(out.split('\n')[5], 'line after');
 });
