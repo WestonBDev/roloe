@@ -72,10 +72,17 @@ export function elasticStore({ esUrl, esUser, esPassword, esApiKey, esIndex, fet
   let copyTo = null;   // the semantic fields `text` copies into right now
   // An endpoint that failed a real write or search stays out until the next restart: a limited
   // endpoint can still answer one small request, so the startup check sends a batch, not a word.
-  const dead = new Set();
+  // The pause is ten minutes, not forever, and only an inference error starts one (Gitar).
+  // copy_to belongs to the index, so it follows what the endpoints do, never an env flag: the
+  // coordinator is the index's only writer (one replica), which is what makes changing it safe.
+  const COOLDOWN_MS = 10 * 60 * 1000;
+  const dead = new Map();          // endpoint id -> when it last refused real work
+  const mapped = { semantic: null, multilingual: null };   // what the index maps, whatever the env says
+  const resting = (id) => dead.has(id) && Date.now() - dead.get(id) < COOLDOWN_MS;
+  const isInferenceError = (x) => /inference|rate limit|\b429\b/i.test(JSON.stringify(x || ''));
   const PROBE = Array.from({ length: 48 }, (_, i) => `roloe startup check ${i}`);
   async function alive(id) {
-    if (!id || dead.has(id)) return false;
+    if (!id || resting(id)) return false;
     try {
       const r = await esRaw('POST', `/_inference/${encodeURIComponent(id)}`, { input: PROBE }, { allow: [400, 403, 404, 408, 429, 500, 502, 503, 504] });
       return r.status === 200;
@@ -84,13 +91,14 @@ export function elasticStore({ esUrl, esUser, esPassword, esApiKey, esIndex, fet
   // Which endpoint an error names; if it names none, both are suspect.
   function blame(errors) {
     const text = JSON.stringify(errors || '');
-    const named = [info.inference_id, info.multilingual_inference_id].filter((id) => id && text.includes(id));
-    for (const id of named.length ? named : [info.inference_id, info.multilingual_inference_id]) if (id) dead.add(id);
+    const all = [mapped.semantic, mapped.multilingual].filter(Boolean);
+    const named = all.filter((id) => text.includes(id));
+    for (const id of named.length ? named : all) dead.set(id, Date.now());
   }
   async function settleInference() {
-    const [elser, jina] = await Promise.all([alive(info.inference_id), alive(info.multilingual_inference_id)]);
-    info.semantic = elser;
-    info.multilingual = jina;
+    const [elser, jina] = await Promise.all([alive(mapped.semantic), alive(mapped.multilingual)]);
+    info.semantic = elser && Boolean(info.inference_id);
+    info.multilingual = jina && Boolean(info.multilingual_inference_id);   // off by env: not queried, still embedded
     const want = [...(elser ? ['text_semantic'] : []), ...(jina ? ['text_jina'] : [])];
     if (copyTo !== null && want.join() !== copyTo.join()) {
       const r = await es('PUT', `/${index}/_mapping`, { properties: { text: want.length ? { type: 'text', copy_to: want } : { type: 'text' } } }, { allow: [400] });
@@ -195,13 +203,17 @@ export function elasticStore({ esUrl, esUser, esPassword, esApiKey, esIndex, fet
           copyTo = r.status === 200 && add.text ? [...EMBEDDED] : [].concat(have.text?.copy_to || []);
         } else copyTo = [].concat(have.text?.copy_to || []);
       }
+      mapped.semantic = info.inference_id; mapped.multilingual = info.multilingual_inference_id;
       if (process.env.ROLOE_MULTILINGUAL === 'off') info.multilingual_inference_id = null;
       info.multilingual = Boolean(info.multilingual_inference_id);
       const mi = await es('HEAD', `/${meetingsIndex}`, undefined, { allow: [404] });
       if (mi.status === 404) await es('PUT', `/${meetingsIndex}`, { mappings: MEETING_MAPPING }, { allow: [400] });
       else await es('PUT', `/${meetingsIndex}/_mapping`, { dynamic: 'strict' }, { allow: [400] });   // created by the setup script: keep it strict
       info.semantic = Boolean(info.inference_id);
-      if (info.inference_id || info.multilingual_inference_id) await settleInference();   // only keep what answers
+      if (mapped.semantic || mapped.multilingual) {
+        await settleInference();   // only keep what answers
+        setInterval(() => { if (dead.size) settleInference().catch(() => {}); }, COOLDOWN_MS).unref();   // and take it back when it does
+      }
       // Probe once: can this credential mint a scoped key? Then describe() is honest from startup.
       if (info.scope.startsWith('document-level') && esApiKey) {   // password auth fails closed at mint time instead
         const probe = await es('POST', '/_security/api_key', {
@@ -347,10 +359,9 @@ export function elasticStore({ esUrl, esUser, esPassword, esApiKey, esIndex, fet
       // A ranking failed (its embedding endpoint refused): find out what still answers and ask
       // again; keywords alone as the last resort. A search never comes back empty because of a model.
       if (semantic && (json.responses || []).some((r) => r.error)) {
-        blame(json.responses.filter((r) => r.error).slice(0, 5));
-        await settleInference();
-        json = await ask(info.semantic, info.multilingual);
-        if ((json.responses || []).some((r) => r.error)) json = await ask(false, false);
+        const refused = json.responses.filter((r) => r.error && isInferenceError(r.error));
+        if (refused.length) { blame(refused.slice(0, 5)); await settleInference(); json = await ask(info.semantic, info.multilingual); }
+        if ((json.responses || []).some((r) => r.error)) json = await ask(false, false);   // this once; nothing is paused
       }
       return json.responses.map((r) => (r.hits?.hits || []).map(docOf));
     },

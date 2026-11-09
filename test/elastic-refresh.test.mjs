@@ -188,3 +188,37 @@ test('copying a card into a meeting reuses its stored embeddings instead of embe
   assert.equal(doc.encounter_id, 'e-1');
   assert.deepEqual(doc._inference_fields, stored, 'and they are written back with the copy');
 });
+
+test('an env flag never narrows the index mapping, and a search error that is not about inference pauses nothing (Gitar)', async () => {
+  process.env.ROLOE_MULTILINGUAL = 'off';
+  let f;
+  try { f = await openInf(); } finally { delete process.env.ROLOE_MULTILINGUAL; }
+  assert.equal(f.store.describe().multilingual, false, 'not queried');
+  assert.equal(textMapping(f.calls), undefined, 'but copy_to is left as it was');
+
+  // A shard failure on one search: answered with keywords this once, semantic search stays on.
+  const calls = [];
+  let failed = false;
+  const fetchImpl = async (url, opts) => {
+    const u = new URL(url);
+    const nd = String(opts.headers['content-type']).includes('ndjson');
+    const body = opts.body === undefined ? undefined : nd ? String(opts.body).trim().split('\n').map((l) => JSON.parse(l)) : JSON.parse(opts.body);
+    calls.push({ method: opts.method, path: u.pathname, body });
+    const reply = (status, json) => new Response(JSON.stringify(json), { status });
+    if (u.pathname === '/') return reply(200, { version: { build_flavor: 'serverless' } });
+    if (u.pathname === '/_inference/_all') return reply(200, { endpoints: [{ inference_id: '.elser-2-elastic' }] });
+    if (opts.method === 'HEAD') return reply(404, {});
+    if (u.pathname === '/_security/api_key') return reply(400, { error: { type: 'illegal_argument_exception' } });
+    if (u.pathname.endsWith('/_msearch') && !failed) { failed = true; return reply(200, { responses: [{ error: { type: 'search_phase_execution_exception', reason: 'all shards failed' }, status: 503 }] }); }
+    if (u.pathname.endsWith('/_msearch')) return reply(200, { responses: [{ hits: { hits: [] } }] });
+    return reply(200, { acknowledged: true });
+  };
+  const store = elasticStore({ esUrl: 'https://x.es.example', esApiKey: 'k', esIndex: 'roloe-t', fetchImpl });
+  await store.init();
+  const k = await store.createEncounterKey('e-1');
+  await store.msearch(k.id, ['q'], { hybrid: true });
+  assert.equal(store.describe().semantic, true, 'nothing was paused');
+  assert.ok(!calls.some((c) => c.method === 'PUT' && c.path.endsWith('/_mapping') && c.body.properties?.text && !c.body.properties.text_jina && !c.body.properties.shared_at), 'the mapping was not touched');
+  await store.msearch(k.id, ['q'], { hybrid: true });
+  assert.equal(calls.filter((c) => c.path.endsWith('/_msearch')).pop().body[1].retriever.rrf.retrievers.length, 2, 'the next search is hybrid again');
+});
