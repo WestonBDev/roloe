@@ -22,7 +22,7 @@ The split is by pod count (1 in 4 pods), not by request weight: the URL goes str
 
 Skip this if `deploy/kustomization.yaml` already lists `rollout.yaml`.
 
-1. Copy `examples/canary/rollout.yaml` to `deploy/rollout.yaml`. In this repo the Deployment lives in `deploy/coordinator.yaml`: add `rollout.yaml` under `resources:` in `deploy/kustomization.yaml` and remove the Deployment `app` from `deploy/coordinator.yaml` (keep its ConfigMap, PVC and Service).
+1. **Not yet for Roloe.** The coordinator keeps meeting state in one process and on a ReadWriteOnce PVC, listens on 7420 and serves `/healthz` (no `/readyz`). Don't copy `examples/canary/rollout.yaml` as-is: it is the starter app (port 8080, `/readyz`, 4 replicas) and would replace Roloe. A canary needs encounter state moved into Elasticsearch first; then write a Rollout that copies the pod spec from `deploy/coordinator.yaml` (port, probes, env, volumes). Until then, ship with the plain Deployment and say so.
 2. If the HPA is on, point its `scaleTargetRef` at `apiVersion: argoproj.io/v1alpha1`, `kind: Rollout`, and delete `replicas:` from the Rollout.
 3. Ship it with the `ship` skill, using `kind: rollout` in `wait_for`. The first Rollout goes straight to 100%: there's no older version to protect.
 
