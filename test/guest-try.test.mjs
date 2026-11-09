@@ -179,7 +179,7 @@ test('two runners for the same owner never both prepare a job: the first claim w
   const { tmpdir } = await import('node:os');
   const { join } = await import('node:path');
   const { execFileSync } = await import('node:child_process');
-  const { runGuestTryOnce } = await import('../src/guest-try.mjs');
+  const { makeRunner } = await import('../src/guest-try.mjs');
   const src = mkdtempSync(join(tmpdir(), 'roloe-gsrc3-'));
   const git = (...a) => execFileSync('git', ['-C', src, ...a], { stdio: 'ignore' });
   git('init', '-q'); git('config', 'user.email', 't@example.com'); git('config', 'user.name', 't');
@@ -196,7 +196,9 @@ test('two runners for the same owner never both prepare a job: the first claim w
     const { g, call } = m;
     await call('POST', `/api/e/${g.id}/findings`, { findings: [{ cites: 'p-e00001', quote: 'card watcher records refresh as done', about: 'p-b00001', what: 'a', change: { edits: [{ file: 'pkg/retry.js', find: '(fn) => fn()', replace: '(fn) => fn() ?? 1' }] } }] }, wes);
     const cfg = { url: m.base, key: s.keys.wes, owner: 'wes' };
-    await Promise.all([runGuestTryOnce(cfg, { clone }), runGuestTryOnce(cfg, { clone, separateProcess: true })]);
+    const a = makeRunner();
+    const b = makeRunner();   // e.g. the MCP server and \`roloe guest-try\` both running
+    await Promise.all([a.once(cfg, { clone }), b.once(cfg, { clone })]);
     assert.equal(clones, 1, 'exactly one runner prepared it');
     assert.equal((await call('GET', `/api/e/${g.id}?k=${g.key}`)).body.findings[0].try.state, 'review');
     m.close();
