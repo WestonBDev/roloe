@@ -62,13 +62,15 @@ test('a tap that fails midway leaves no open encounter, no copies and no live ke
   try {
     const { aiden, wes } = await twoCards(s);
     const orig = s.store.createEncounterKey;
-    s.store.createEncounterKey = async () => { throw Object.assign(new Error('boom'), { code: 'es_down' }); };
+    let failedId = null;
+    s.store.createEncounterKey = async (enc) => { failedId = enc; throw Object.assign(new Error('boom'), { code: 'es_down' }); };
     const tap = await s.call('POST', '/api/tap', { to: 'wes' }, aiden);
     s.store.createEncounterKey = orig;
     assert.equal(tap.status, 500);
     assert.deepEqual(Object.keys(s.state().encounters), []);
     assert.equal((await s.call('GET', '/api/me/encounters', null, wes)).body.encounters.length, 0);
-    assert.equal(await s.store.copyCardsToEncounter('e-probe', []), 0);
+    assert.ok(failedId);
+    assert.equal(await s.store.deleteEncounter(failedId), 0, 'its copies were already deleted');
     const leftovers = (await s.store.listCard('aiden')).length + (await s.store.listCard('wes')).length;
     assert.equal(leftovers, 4, 'cards untouched');
     // no encounter copies remain: a fresh tap's key sees exactly its own 4

@@ -33,7 +33,8 @@ function isReference(v) {
 export function scrub(text) {
   let out = String(text ?? '');
   const removed = [];
-  const take = (kind) => (m) => { removed.push({ kind, value: m }); return `[removed: ${kind}]`; };
+  // Keep the line count: citations point at line numbers in the real file.
+  const take = (kind) => (m) => { removed.push({ kind, value: m }); return `[removed: ${kind}]` + '\n'.repeat((m.match(/\n/g) || []).length); };
   for (const [kind, re] of PATTERNS) out = out.replace(re, take(kind));
   out = out.replace(ASSIGN, (m, name, sep, value) => {
     if (isReference(value)) return m;
