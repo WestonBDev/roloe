@@ -182,11 +182,26 @@ const commands = {
     out('Now open your assistant in your project and say: "Call roloe_wait_for_tap, then follow its instructions; repeat."');
   },
 
+  // Off-limits terms: names, clients, topics that must never be on the card or in a finding.
+  async ['off-limits']() {
+    const cfg = cfgFor();
+    const [action = 'list', ...terms] = pos;
+    const set = new Set(cfg.offLimits || []);
+    if (action === 'add') terms.forEach((t) => set.add(t.trim()));
+    else if (action === 'remove') terms.forEach((t) => set.delete(t.trim()));
+    else if (action !== 'list') throw new Error('Usage: roloe off-limits list | add <term>... | remove <term>...');
+    cfg.offLimits = [...set];
+    saveConfig(cfg);
+    if (action !== 'list') { const r = await refreshCard(cfg); out(`Card refreshed: ${r.passages} passages, ${r.totals.off_limits_removed} off-limits mentions removed.`); }
+    out(`${cfg.offLimits.length} off-limits terms${cfg.offLimits.length ? ': ' + cfg.offLimits.join(', ') : ''}`);
+  },
+
   async help() {
     out(`roloe join --url <coordinator> --owner <name> --name "<Name>" --project <dir>   (on + connect Claude Code / Codex)
 roloe on --owner <name> --name "<Name>" --project <dir> [--url <coordinator>] [--same-person-as <your first card>]
 roloe off | refresh | show [--all|--json] | private <passage_id> [--undo] | me
-roloe tap <name> | inbox | try [<meeting>] [--project <dir>] | stop [<meeting>] | canary | mcp`);
+roloe tap <name> | inbox | try [<meeting>] [--project <dir>] | stop [<meeting>] | canary | mcp
+roloe off-limits list | add <term>... | remove <term>...`);
   },
 };
 

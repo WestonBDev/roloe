@@ -1,7 +1,7 @@
 // Egress gate: code that checks outgoing text for known secrets and secret-shaped strings.
 // It looks at the text and its base64, base64url and hex-decoded views; it catches known values
 // verbatim, with spacing or punctuation changed, or as their distinctive fragments.
-import { secretShaped } from './scrub.mjs';
+import { secretShaped, applyOffLimits } from './scrub.mjs';
 
 const norm = (s) => s.toLowerCase().replace(/[^a-z0-9@.]/g, '').replace(/\./g, '');
 
@@ -42,8 +42,9 @@ export function coverage(secret, text) {
   return covered / secret.length;
 }
 
-export function gate(text, knownSecrets = []) {
+export function gate(text, knownSecrets = [], offLimits = []) {
   const s = typeof text === 'string' ? text : JSON.stringify(text ?? '');
+  if (offLimits.length && applyOffLimits(s, offLimits).count) return { ok: false, reason: 'off-limits' };
   const views = decodedViews(s);
   const normViews = views.map(norm);
   for (const v of views) {

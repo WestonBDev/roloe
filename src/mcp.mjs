@@ -5,7 +5,7 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z } from 'zod';
-import { loadConfig, api, refreshCard } from './client.mjs';
+import { loadConfig, saveConfig, api, refreshCard } from './client.mjs';
 import { gate } from './gate.mjs';
 
 const SERVER_INSTRUCTIONS = `Roloe: when someone taps cards with your user, a notification or roloe_wait_for_tap gives you an encounter.
@@ -70,9 +70,9 @@ export async function runMcp() {
   }, async ({ encounter_id, findings = [], nothing_strong = false }) => {
     // Local egress gate: the owner's own removed values never leave this machine.
     const fresh = loadConfig(cfg.owner);
-    const blocked = findings.map((f, i) => ({ i, g: gate(JSON.stringify(f), fresh.removed || []) })).filter((x) => !x.g.ok);
+    const blocked = findings.map((f, i) => ({ i, g: gate(JSON.stringify(f), fresh.removed || [], fresh.offLimits || []) })).filter((x) => !x.g.ok);
     if (blocked.length) {
-      return fail(`Blocked on this machine before sending: finding ${blocked.map((b) => b.i + 1).join(', ')} contains ${blocked[0].g.reason === 'known secret' ? 'a value your user\'s scrubber removed' : 'a secret-shaped string'}. Rewrite it without that value and post again. Nothing was sent.`);
+      return fail(`Blocked on this machine before sending: finding ${blocked.map((b) => b.i + 1).join(', ')} contains ${blocked[0].g.reason === 'known secret' ? 'a value your user\'s scrubber removed' : blocked[0].g.reason === 'off-limits' ? 'a term your user marked off-limits' : 'a secret-shaped string'}. Rewrite it without that value and post again. Nothing was sent.`);
     }
     const body = nothing_strong || !findings.length ? { nothing_strong: true } : { findings };
     return text(await api(cfg, 'POST', `/api/e/${encounter_id}/findings`, body));
@@ -85,6 +85,20 @@ export async function runMcp() {
     const id = encounter_id || (await inbox())[0]?.id;
     if (!id) return fail('No encounters yet.');
     return text(await api(cfg, 'GET', `/api/e/${id}/for-me`));
+  });
+
+  server.registerTool('roloe_off_limits', {
+    description: 'List, add or remove your user\'s off-limits terms (names, clients, topics). They are removed from the card before indexing and blocked from any finding. Only change them when your user asks.',
+    inputSchema: { action: z.enum(['list', 'add', 'remove']), terms: z.array(z.string().min(2).max(80)).max(50).optional() },
+  }, async ({ action, terms = [] }) => {
+    const c = loadConfig(cfg.owner);
+    const set = new Set(c.offLimits || []);
+    if (action === 'add') terms.forEach((t) => set.add(t.trim()));
+    if (action === 'remove') terms.forEach((t) => set.delete(t.trim()));
+    c.offLimits = [...set];
+    saveConfig(c);
+    if (action !== 'list') await refreshCard(c);
+    return text({ off_limits: c.offLimits, card: action === 'list' ? 'unchanged' : 'refreshed' });
   });
 
   server.registerTool('roloe_inbox', {

@@ -46,7 +46,7 @@ test('MCP: wait for a tap, pull, local gate blocks an owner secret, post, findin
     const caps = client.getServerCapabilities();
     assert.ok(caps.experimental?.['claude/channel'], 'declares the Claude Code channel');
     const tools = (await client.listTools()).tools.map((t) => t.name).sort();
-    assert.deepEqual(tools, ['roloe_findings_for_me', 'roloe_inbox', 'roloe_post_findings', 'roloe_pull', 'roloe_search_mine', 'roloe_wait_for_tap']);
+    assert.deepEqual(tools, ['roloe_findings_for_me', 'roloe_inbox', 'roloe_off_limits', 'roloe_post_findings', 'roloe_pull', 'roloe_search_mine', 'roloe_wait_for_tap']);
 
     const waiting = client.callTool({ name: 'roloe_wait_for_tap', arguments: { timeout_s: 10 } });
     await new Promise((r) => setTimeout(r, 300));

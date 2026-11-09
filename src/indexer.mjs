@@ -5,7 +5,7 @@ import { join, resolve, extname, basename } from 'node:path';
 import { homedir } from 'node:os';
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { scrub } from './scrub.mjs';
+import { scrub, applyOffLimits } from './scrub.mjs';
 
 const MAX_TEXT = 1500;
 const MAX_PASSAGES = 420;
@@ -169,7 +169,7 @@ export function readCommits(projectDir, n = 25) {
 }
 
 // ---------- Build the card ----------
-export function buildCard({ owner, projectDir, since = startOfToday(), sessions = true }) {
+export function buildCard({ owner, projectDir, since = startOfToday(), sessions = true, offLimits = [] }) {
   const dir = resolve(projectDir);
   const raw = [];
   const removed = [];
@@ -192,14 +192,16 @@ export function buildCard({ owner, projectDir, since = startOfToday(), sessions 
   // Newest sessions first, then commits, then files: when the cap bites, old file chunks go first.
   const order = { session: 0, commit: 1, file: 2 };
   raw.sort((a, b) => order[a.kind] - order[b.kind] || b.ts - a.ts);
+  let offLimitsRemoved = 0;
+  const ol = (t) => { const r = applyOffLimits(t, offLimits); offLimitsRemoved += r.count; return r.text; };
   for (const p of raw) {
     const s = scrub(p.text);
     removed.push(...s.removed);
-    const text = s.text.slice(0, MAX_TEXT);
+    const text = ol(s.text).slice(0, MAX_TEXT);
     const id = passageId(owner, p.locator, text);
     if (seen.has(id)) continue;
     seen.add(id);
-    passages.push({ passage_id: id, kind: p.kind, speaker: p.speaker, source: scrub(p.source).text, locator: scrub(p.locator).text, ts: new Date(p.ts).toISOString(), text, via: p.via || '' });
+    passages.push({ passage_id: id, kind: p.kind, speaker: p.speaker, source: ol(scrub(p.source).text), locator: ol(scrub(p.locator).text), ts: new Date(p.ts).toISOString(), text, via: p.via || '' });
     if (passages.length >= MAX_PASSAGES) break;
   }
   const totals = {
@@ -209,6 +211,7 @@ export function buildCard({ owner, projectDir, since = startOfToday(), sessions 
     commits: passages.filter((p) => p.kind === 'commit').length,
     owner_messages: passages.filter((p) => p.speaker === 'owner' && p.kind === 'session').length,
     secrets_removed: removed.length,
+    off_limits_removed: offLimitsRemoved,
   };
   return { passages, totals, removed: [...new Set(removed.map((r) => r.value))] };
 }

@@ -60,3 +60,16 @@ export function secretShaped(text) {
   ASSIGN.lastIndex = 0;
   return null;
 }
+
+// "Off-limits, always": names, clients, topics the owner lists. Whole words, any case, removed
+// before anything is indexed, and blocked by the gate on the way out.
+const esc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+export function applyOffLimits(text, terms = []) {
+  let out = String(text ?? '');
+  let count = 0;
+  for (const t of terms.map((x) => String(x).trim()).filter((x) => x.length >= 2)) {
+    const re = new RegExp(`(?<![\\p{L}\\p{N}])${esc(t).replace(/\s+/g, '\\s+')}(?![\\p{L}\\p{N}])`, 'giu');
+    out = out.replace(re, () => { count++; return '[removed: off-limits]'; });
+  }
+  return { text: out, count };
+}
