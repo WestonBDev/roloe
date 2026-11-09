@@ -33,6 +33,8 @@ test('guest Try it: job → literal diff on the phone → guest approves → giv
     // The guest can't approve before there is a diff to read.
     assert.equal((await call('POST', `/api/e/${g.id}/try-approve?k=${g.key}`, { finding: f })).status, 409);
     const diff = 'diff --git a/pkg/retry.js b/pkg/retry.js\n-export const retry = (fn) => fn();\n+export const retry = (fn) => withBackoff(fn);\n';
+    await call('POST', `/api/e/${g.id}/guest-try`, { finding: f, state: 'preparing' }, wes);
+    assert.equal((await call('POST', `/api/e/${g.id}/guest-try`, { finding: f, state: 'preparing' }, wes)).status, 409, 'a second runner can\'t claim it');
     await call('POST', `/api/e/${g.id}/guest-try`, { finding: f, state: 'review', diff, test_command: 'npm test' }, wes);
     let view = (await call('GET', `/api/e/${g.id}?k=${g.key}`)).body;
     assert.equal(view.findings[0].try.state, 'review');
@@ -41,7 +43,7 @@ test('guest Try it: job → literal diff on the phone → guest approves → giv
     assert.equal((await call('POST', `/api/e/${g.id}/try-approve?k=${g.key}`, { finding: f })).status, 200);
     jobs = (await call('GET', '/api/me/try-jobs', null, wes)).body.jobs;
     assert.equal(jobs[0].state, 'approved');
-    for (const st of ['installing', 'testing']) await call('POST', `/api/e/${g.id}/guest-try`, { finding: f, state: st }, wes);
+    for (const st of ['installing', 'testing']) assert.equal((await call('POST', `/api/e/${g.id}/guest-try`, { finding: f, state: st }, wes)).status, 200);
     await call('POST', `/api/e/${g.id}/guest-try`, { finding: f, state: 'passed', passed: 6, failed: 0, test_ms: 2100 }, wes);
     view = (await call('GET', `/api/e/${g.id}?k=${g.key}`)).body;
     assert.equal(view.findings[0].try.state, 'passed');
@@ -63,6 +65,7 @@ test('guest Try it is honest: no tests means "no tests to run", never green; onl
     const f = (await call('GET', '/api/me/try-jobs', null, wes)).body.jobs[0].finding;
     assert.equal((await call('POST', `/api/e/${g.id}/guest-try`, { finding: f, state: 'passed', passed: 1 }, aiden)).status, 403, 'not their meeting');
     assert.equal((await call('POST', `/api/e/${g.id}/guest-try`, { finding: f, state: 'passed', passed: 1 }, wes)).status, 409, 'nothing approved yet: can\'t be green');
+    await call('POST', `/api/e/${g.id}/guest-try`, { finding: f, state: 'preparing' }, wes);
     await call('POST', `/api/e/${g.id}/guest-try`, { finding: f, state: 'no-tests', diff: 'diff --git a/x b/x\n' }, wes);
     const v = (await call('GET', `/api/e/${g.id}?k=${g.key}`)).body;
     assert.equal(v.findings[0].try.state, 'no-tests');

@@ -12,8 +12,6 @@ import { api } from './client.mjs';
 import { applyEdits, literalDiff, plan, runSandboxed, dockerAvailable, toolPath } from './tryit.mjs';
 
 const run = promisify(execFile);
-const prepared = new Map();   // job key -> { dir, testDir }
-const running = new Set();
 const keyOf = (j) => `${j.encounter_id}:${j.finding}`;
 
 // Only public GitHub repos, cloned shallow and (for a folder) sparse.
@@ -44,69 +42,82 @@ async function prepare(job, clone) {
   return { dir, testDir, state: 'review', diff, test_command: p.test };
 }
 
-// One pass over this owner's guest Try it jobs. Called on a short loop by the MCP server.
-export async function runGuestTryOnce(cfg, { clone = gitClone } = {}) {
-  const { jobs } = await api(cfg, 'GET', '/api/me/try-jobs');
-  const report = (job, body) => api(cfg, 'POST', `/api/e/${job.encounter_id}/guest-try`, { finding: job.finding, ...body }).catch(() => {});
-  // Declined, stopped or finished elsewhere: its clone goes now, not when this process exits.
-  const live = new Set(jobs.map(keyOf));
-  for (const [k, p] of prepared) if (!live.has(k) && !running.has(k)) { rmSync(p.dir, { recursive: true, force: true }); prepared.delete(k); }
-  // Also clones on disk that no live job owns (left by a runner that restarted).
-  const cache = join(homedir(), '.cache', 'roloe');
-  const liveDirs = new Set(jobs.map((j) => `guest-${j.encounter_id}-${j.finding}`));
-  if (existsSync(cache)) for (const d of readdirSync(cache)) if (/^guest-e-[0-9a-f]{10}-f-[0-9a-f]{8}(-cache)?$/.test(d) && !liveDirs.has(d.replace(/-cache$/, ''))) rmSync(join(cache, d), { recursive: true, force: true });
-  for (const job of jobs) {
-    if (job.state === 'review') continue;   // waiting for the guest's yes
-    const k = keyOf(job);
-    if (running.has(k)) continue;
-    running.add(k);
-    try {
-      if (job.state === 'diff-pending' || (job.state === 'approved' && !prepared.has(k))) {
-        let p;
-        try { p = await prepare(job, clone); } catch (e) {
-          console.error('[roloe] guest try prepare failed:', e.code || e.name, String(e.stderr || e.message || '').slice(0, 200));
-          p = { state: 'did-not-apply', reason: e.code === 'bad_repo' ? 'Only public GitHub repos can be tried.' : 'Could not fetch the repo to try the change just now.', diff: '' };
-        }
+// A runner: its own memory of prepared clones. Several may run for one owner (the MCP server and
+// `roloe guest-try`); each job is claimed at the coordinator first, so exactly one does the work.
+export function makeRunner() {
+  const prepared = new Map();   // job key -> { dir, testDir, diff }
+  const running = new Set();
+
+  async function once(cfg, { clone = gitClone } = {}) {
+    const { jobs } = await api(cfg, 'GET', '/api/me/try-jobs');
+    const post = (job, body) => api(cfg, 'POST', `/api/e/${job.encounter_id}/guest-try`, { finding: job.finding, ...body }).then(() => true, () => false);
+    // Declined, stopped or finished: its clone goes now, not when this process exits.
+    const live = new Set(jobs.map(keyOf));
+    for (const [k, p] of prepared) if (!live.has(k) && !running.has(k)) { rmSync(p.dir, { recursive: true, force: true }); prepared.delete(k); }
+    // Also clones on disk that no live job owns (left by a runner that restarted).
+    const cache = join(homedir(), '.cache', 'roloe');
+    const liveDirs = new Set(jobs.map((j) => `guest-${j.encounter_id}-${j.finding}`));
+    if (existsSync(cache)) for (const d of readdirSync(cache)) if (/^guest-e-[0-9a-f]{10}-f-[0-9a-f]{8}(-cache)?$/.test(d) && !liveDirs.has(d.replace(/-cache$/, ''))) rmSync(join(cache, d), { recursive: true, force: true });
+
+    for (const job of jobs) {
+      const k = keyOf(job);
+      if (running.has(k) || !['diff-pending', 'approved'].includes(job.state)) continue;
+      running.add(k);
+      try {
         if (job.state === 'diff-pending') {
-          await report(job, { state: p.state, diff: p.diff, reason: p.reason, test_command: p.test_command });
+          if (!(await post(job, { state: 'preparing' }))) continue;   // another runner claimed it
+          const p = await safePrepare(job, clone);
+          await post(job, { state: p.state, diff: p.diff, reason: p.reason, test_command: p.test_command });
           if (p.state === 'review') prepared.set(k, p); else if (p.dir) rmSync(p.dir, { recursive: true, force: true });
           continue;
         }
-        if (p.state !== 'review') { await report(job, { state: 'failed', reason: p.reason || 'Could not prepare the change again.' }); if (p.dir) rmSync(p.dir, { recursive: true, force: true }); continue; }
-        // Only ever run exactly what the guest read and approved.
+        // approved: claim the run, then run exactly what the guest read.
+        if (!(await post(job, { state: 'installing' }))) continue;
+        let p = prepared.get(k);
+        if (!p) {
+          p = await safePrepare(job, clone);
+          if (p.state !== 'review') { await post(job, { state: 'failed', reason: p.reason || 'Could not prepare the change again.' }); if (p.dir) rmSync(p.dir, { recursive: true, force: true }); continue; }
+        }
         if (job.approved_diff != null && p.diff !== job.approved_diff) {
-          await report(job, { state: 'failed', reason: 'Your repo changed since you approved this change, so it wasn\'t run. Scan again for a fresh one.' });
+          await post(job, { state: 'failed', reason: 'Your repo changed since you approved this change, so it wasn\'t run. Scan again for a fresh one.' });
           rmSync(p.dir, { recursive: true, force: true });
+          prepared.delete(k);
           continue;
         }
-        prepared.set(k, p);
-      }
-      if (job.state === 'approved') {
-        const p = prepared.get(k);
         if (!dockerAvailable()) {
-          await report(job, { state: 'failed', reason: 'Docker isn\'t running on the card owner\'s laptop, so the tests could not run.' });
+          await post(job, { state: 'failed', reason: 'Docker isn\'t running on the card owner\'s laptop, so the tests could not run.' });
         } else {
           // Its own package cache: a stranger's install never shares one with the owner's runs.
           const cacheDir = `${p.dir}-cache`;
           mkdirSync(cacheDir, { recursive: true });
-          const r = await runSandboxed(p.testDir, { keepCopy: true, cacheDir, onState: (st) => { if (st === 'installing' || st === 'testing') report(job, { state: st }); } });
+          const r = await runSandboxed(p.testDir, { keepCopy: true, cacheDir, onState: (st) => { if (st === 'testing') post(job, { state: 'testing' }); } });
           rmSync(cacheDir, { recursive: true, force: true });
-          await report(job, { state: r.state, passed: r.passed, failed: r.failed, test_ms: r.test_ms, reason: r.reason });
+          await post(job, { state: r.state, passed: r.passed, failed: r.failed, test_ms: r.test_ms, reason: r.reason });
         }
         rmSync(p.dir, { recursive: true, force: true });
         prepared.delete(k);
+      } finally {
+        running.delete(k);
       }
-    } finally {
-      running.delete(k);
     }
+  }
+
+  return {
+    once,
+    forget() { prepared.clear(); },
+    cleanup() { for (const p of prepared.values()) if (existsSync(p.dir)) rmSync(p.dir, { recursive: true, force: true }); prepared.clear(); },
+  };
+}
+
+async function safePrepare(job, clone) {
+  try { return await prepare(job, clone); } catch (e) {
+    console.error('[roloe] guest try prepare failed:', e.code || e.name, String(e.stderr || e.message || '').slice(0, 200));
+    return { state: 'did-not-apply', reason: e.code === 'bad_repo' ? 'Only public GitHub repos can be tried.' : 'Could not fetch the repo to try the change just now.', diff: '' };
   }
 }
 
-// Forget prepared work in memory (as a restarted runner would). For tests.
-export function forgetPrepared() { prepared.clear(); }
-
-// Clean up anything left behind (a restarted runner re-prepares from the job).
-export function cleanupGuestTries() {
-  for (const p of prepared.values()) if (existsSync(p.dir)) rmSync(p.dir, { recursive: true, force: true });
-  prepared.clear();
-}
+// The default runner for this process.
+const defaultRunner = makeRunner();
+export const runGuestTryOnce = (cfg, opts) => defaultRunner.once(cfg, opts);
+export const forgetPrepared = () => defaultRunner.forget();
+export const cleanupGuestTries = () => defaultRunner.cleanup();

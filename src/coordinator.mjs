@@ -635,7 +635,9 @@ export function buildApp({ store, guestReader = readGuestInput, guestReadTimeout
     for (const enc of Object.values(state.encounters)) {
       if (enc.status !== 'open' || !enc.guest?.repo || enc.a !== me.owner) continue;
       for (const f of enc.findings) {
-        if (f.giver !== me.owner || !['diff-pending', 'review', 'approved'].includes(f.try?.state)) continue;
+        // A claim left by a runner that died goes back in the queue after two minutes.
+        if (f.try?.state === 'preparing' && Date.now() - (f.try.at || 0) > 120000) f.try = { ...f.try, state: 'diff-pending' };
+        if (f.giver !== me.owner || !['diff-pending', 'preparing', 'review', 'approved', 'installing', 'testing'].includes(f.try?.state)) continue;
         jobs.push({ encounter_id: enc.id, finding: f.id, repo: enc.guest.repo, ref: enc.guest.ref || 'HEAD', path: enc.guest.path || '', edits: f.change.edits, state: f.try.state,
           ...(f.try.state === 'approved' ? { approved_diff: f.try.diff ?? '' } : {}) });
       }
@@ -643,9 +645,11 @@ export function buildApp({ store, guestReader = readGuestInput, guestReadTimeout
     send(res, 200, { jobs });
   });
 
+  // Each runner claims a job before working on it: 'preparing' (the diff) and 'installing' (the run).
   const GUEST_TRY_FROM = {
-    review: ['diff-pending'], 'no-tests': ['diff-pending'], 'did-not-apply': ['diff-pending'],
-    installing: ['approved'], testing: ['approved', 'installing'], passed: ['approved', 'installing', 'testing'], failed: ['approved', 'installing', 'testing'],
+    preparing: ['diff-pending'],
+    review: ['preparing'], 'no-tests': ['preparing'], 'did-not-apply': ['preparing'],
+    installing: ['approved'], testing: ['installing'], passed: ['installing', 'testing'], failed: ['installing', 'testing'],
   };
   r.add('POST', '/api/e/:id/guest-try', async ({ req, res, params }) => {
     const enc = getEncounter(params.id);
