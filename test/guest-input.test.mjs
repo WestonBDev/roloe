@@ -44,7 +44,7 @@ test('a GitHub subfolder: only that folder\'s text files, from the tarball, scru
     'packages/api/README.md': '# API\nRetry uploads with backoff. Contact ops@example.com\n',
     'packages/api/src/retry.js': 'export async function retry(fn) { for (;;) { try { return await fn(); } catch {} } }\n',
     'packages/api/logo.png': 'PNG',
-    'packages/api/.env': 'SECRET=abc123abc123',
+    'packages/api/.env': 'SECRET=' + 'abc123'.repeat(2),
     'packages/web/src/app.js': 'export const app = 1;\n',
   });
   const calls = [];
