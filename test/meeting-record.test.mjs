@@ -37,3 +37,26 @@ test('a tap, and a stop, each update the meeting record in the store', async () 
     assert.equal((await s.store.listMeetings()).find((m) => m.meeting_id === id).stopped, true);
   } finally { await s.close(); }
 });
+
+test('a guest meeting stopped while it is still opening leaves a record, marked stopped (Gitar)', async () => {
+  const s = await startTestServer();
+  try {
+    await twoCards(s);
+    const http = await import('node:http');
+    const { buildApp } = await import('../src/coordinator.mjs');
+    // A guest reader that never finishes in time keeps the meeting in "preparing".
+    const app = buildApp({ store: s.store, guestReader: () => new Promise((r) => setTimeout(() => r({ kind: 'text', passages: [] }), 1500)) });
+    const srv = http.createServer(app.handle);
+    await new Promise((r) => srv.listen(0, '127.0.0.1', r));
+    const base = `http://127.0.0.1:${srv.address().port}`;
+    const g = await (await fetch(`${base}/api/g/wes/start`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ link: 'https://example.com/slow' }) })).json();
+    const stop = await fetch(`${base}/api/e/${g.id}/stop?k=${g.key}`, { method: 'POST' });
+    assert.equal((await stop.json()).before_open, true);
+    await new Promise((r) => setTimeout(r, 30));
+    const rec = (await s.store.listMeetings()).find((m) => m.meeting_id === g.id);
+    assert.ok(rec, 'the stopped meeting has a record');
+    assert.equal(rec.stopped, true);
+    assert.equal(rec.kind, 'guest');
+    srv.close();
+  } finally { await s.close(); }
+});

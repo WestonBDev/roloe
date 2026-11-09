@@ -15,6 +15,8 @@ const CASES = [
   { name: 'monorepo subfolder', body: { link: 'https://github.com/vercel/next.js/tree/canary/packages/next/src/lib' } },
   { name: 'blog / docs page', body: { link: 'https://nodejs.org/en/learn/test-runner/using-test-runner' } },
   { name: 'sentence only', body: { text: "I'm adding OpenTelemetry to a Node service but no spans show up in my backend, and I can't tell if it's the exporter or the auth header." } },
+  // Not English: only the multilingual (Jina) ranking can match this against English work.
+  { name: 'sentence in Spanish', body: { text: 'Estoy añadiendo OpenTelemetry a un servicio de Node, pero no aparece ningún span en mi backend y no sé si el problema es el exportador o la cabecera de autenticación.' } },
   { name: 'skip', body: {} },
 ];
 
