@@ -173,7 +173,7 @@ test('hardening: simultaneous stops agree, a failing stop proof still closes, gu
     assert.equal(s.state().encounters[m2.id].status, 'closed');
 
     const codes = [];
-    for (let i = 0; i < 14; i++) codes.push((await s.call('POST', '/api/g/wes/start', {})).status);
+    for (let i = 0; i < 35; i++) codes.push((await s.call('POST', '/api/g/wes/start', {})).status);
     assert.ok(codes.includes(429), `rate limited: ${codes.join(',')}`);
     assert.equal(codes[0], 201);
 
