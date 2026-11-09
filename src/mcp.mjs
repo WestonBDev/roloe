@@ -31,7 +31,7 @@ export async function runMcp() {
   const pull = async (id) => api(cfg, 'GET', `/api/e/${id}/pull`);
 
   server.registerTool('roloe_wait_for_tap', {
-    description: 'Wait (up to timeout_s) for someone to tap cards with your user, then return that encounter\'s pull: their overlapping passages, yours, and the rules. Call again if it returns no tap yet.',
+    description: 'Wait (up to timeout_s) for someone to scan your user\'s card or meet them, then return that encounter\'s pull: their overlapping passages, yours, and the rules. Call again if it returns no tap yet.',
     inputSchema: { timeout_s: z.number().min(1).max(110).optional() },
   }, async ({ timeout_s = 50 }) => {
     const until = Date.now() + timeout_s * 1000;
@@ -107,7 +107,7 @@ export async function runMcp() {
         const name = plain(e.with_name);
         await server.server.notification({
           method: 'notifications/claude/channel',
-          params: { content: `${name} just tapped cards with you (Roloe encounter ${e.id}). What do ${name} and I have for each other?`, meta: { encounter_id: e.id, with: plain(e.with), guest: String(e.guest) } },
+          params: { content: `${name} just ${e.guest ? 'scanned your Roloe card' : 'met you through Roloe'} (encounter ${e.id}). What do ${name} and I have for each other?`, meta: { encounter_id: e.id, with: plain(e.with), guest: String(e.guest) } },
         });
       }
     } catch { /* coordinator unreachable: try again next tick */ }

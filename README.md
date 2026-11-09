@@ -1,6 +1,20 @@
 # Roloe
 
-**A business card that brings your work. Tap, and the person in front of you gets the help you already have.**
+**A business card that brings your work. Scan, and the person in front of you gets the help you already have.**
+
+## Run your card in two steps
+
+1. **Once, on your laptop** (Node 22, git, and Claude Code or Codex logged in on your own account):
+
+   ```bash
+   git clone https://github.com/WestonBDev/roloe ~/roloe && cd ~/roloe && npm ci && node bin/roloe.mjs join --url <coordinator URL> --owner <short-name> --name "<Your Name>" --project <the project you're working on today>
+   ```
+
+2. **In your assistant, opened in that project, say once:**
+
+   > Wait for Roloe meetings: call roloe_wait_for_tap, follow the instructions it returns, post your findings, then call it again. Keep going until I say stop.
+
+People meet you by scanning your QR: open `/q/<short-name>` on your phone or screen. Check exactly what your card shares with `node bin/roloe.mjs show`.
 
 Built during the WeMakeDevs Cloud Native Hackathon, November 9, 2026. AI coding assistants (Claude Code and Codex) were used; I can explain every part of the architecture and the decisions behind it.
 

@@ -96,5 +96,16 @@ async function refresh() {
     $('#names').textContent = e.offline ? 'Offline: reconnecting…' : e.status === 401 ? 'This stage link is missing its key.' : e.message;
   }
 }
-poll(refresh, 1000);
+// A large QR for judges in their seats: the zero-install guest page of the card owner.
+async function judgeQr() {
+  const who = qs.get('qr') || live?.a;
+  if (!who || qs.get('qr') === 'off' || who.startsWith('guest-')) return;
+  const r = await fetch(`/api/cards/${encodeURIComponent(who)}/qr.svg`);
+  if (!r.ok) return;
+  $('#judgeqrimg').innerHTML = await r.text();
+  $('#judgeqrlabel').textContent = `Scan to meet ${live.names[who] || who}`;
+  $('#judgeqr').hidden = false;
+}
+let qrShown = false;
+poll(async () => { await refresh(); if (live && !qrShown) { qrShown = true; judgeQr().catch(() => {}); } }, 1000);
 (function tick() { render(); requestAnimationFrame(tick); })();

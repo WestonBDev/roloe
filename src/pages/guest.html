@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<title>Roloe · tap</title>
+<title>Roloe · scan</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Caveat:wght@500&family=Familjen+Grotesk:wght@400;600;700&family=IBM+Plex+Mono:wght@400;600&display=swap">
 <link rel="stylesheet" href="/roloe.css">
@@ -18,9 +18,12 @@
   </article>
   <div id="as"></div>
   <form class="card" id="start" hidden><span class="tab">Your side</span>
-    <label for="link"><h2>Paste a link to something you've built</h2></label>
-    <input id="link" type="url" inputmode="url" autocomplete="off" placeholder="https://github.com/you/project">
-    <p class="muted" style="font-size:14px;margin-top:8px">A public repo or post. Nothing about you is looked up unless you give it. Optional.</p>
+    <label for="text"><h2>What are you working on, or stuck on right now?</h2></label>
+    <textarea id="text" rows="3" maxlength="600" placeholder="One to three sentences"></textarea>
+    <label for="link"><p style="margin-top:12px"><b>Or a link</b> <span class="muted">· a public repo, a folder in one, a post, a README</span></p></label>
+    <input id="link" type="url" inputmode="url" autocomplete="off" placeholder="https://github.com/you/project/tree/main/folder">
+    <p class="state" style="margin-top:10px;color:var(--red)">Nothing private, please.</p>
+    <p class="muted" style="font-size:14px">Whatever you give is scrubbed, read only for this meeting, and deleted when it ends. Nothing about you is looked up unless you give it here.</p>
     <div class="row" style="margin-top:14px"><button type="submit" id="send">Send</button><button type="button" class="ghost" id="skip">Skip</button></div>
   </form>
   <p id="err" class="state bad" hidden></p>

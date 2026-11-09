@@ -60,7 +60,7 @@ test('MCP: wait for a tap, pull, local gate blocks an owner secret, post, findin
 
     // The channel pushed the tap into the session too, with plain names only.
     await new Promise((r) => setTimeout(r, 500));
-    assert.ok(channel.some((c) => c.meta?.encounter_id === tap.body.id && /Wes just tapped cards with you/.test(c.content)));
+    assert.ok(channel.some((c) => c.meta?.encounter_id === tap.body.id && /Wes just met you through Roloe/.test(c.content)));
 
     const mine = pulled.mine[0];
     const theirs = pulled.theirs[0];

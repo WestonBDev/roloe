@@ -43,8 +43,9 @@ function waitSection(v) {
   if (v.status !== 'open' || theirs.posted) return '';
   const n = Math.round((Date.now() - firstSeen) / 1000);
   return `<div class="card"><span class="tab">${esc(v.their_name)}'s assistant is reading</span>
-    <h2>Keep talking. We'll tap you when there's something.</h2>
-    <p class="state wait"><span class="mono" id="secs">${n} s</span></p></div>`;
+    <h2>Keep talking. We'll show it here when there's something.</h2>
+    <p class="state wait"><span class="mono" id="secs">${n} s</span></p>
+    ${n > 60 ? `<p class="muted" style="margin-top:6px">Still reading. ${esc(v.their_name)}'s assistant sometimes takes a little longer. This page updates by itself, and this link keeps working if you come back later.</p>` : ''}</div>`;
 }
 
 function findingsSection(v) {
@@ -84,8 +85,12 @@ function receiptSection(v) {
 
 function guestSection(v) {
   if (!v.guest) return '';
+  const gi = v.guest_input || {};
+  const read = gi.error ? `<div class="card"><span class="tab">About your link</span><p>${esc(gi.error)}</p><p class="muted">The meeting goes on with what you wrote, or with ${esc(v.their_name)}'s most useful work.</p></div>`
+    : gi.kind === 'github' ? `<p class="muted">Read ${gi.files ?? 0} files from your repo, for this meeting only.</p>`
+    : gi.kind === 'page' ? '<p class="muted">Read the text of your link, for this meeting only.</p>' : '';
   const done = v.their_side.posted;
-  return `${done ? `<div class="card"><span class="tab">Your turn, if you like</span>
+  return `${read}${done ? `<div class="card"><span class="tab">Your turn, if you like</span>
       <p>Get findings from your own work too: <code>git clone https://github.com/WestonBDev/roloe</code>, then <code>roloe on</code>. It's an offer, not a gate.</p></div>` : ''}
     <form class="card" id="probe"><span class="tab">Try to extract something</span>
       <label for="q"><p>Type anything you think ${esc(v.their_name)} might have that wasn't shared. This asks the coordinator directly, not anyone's assistant.</p></label>
