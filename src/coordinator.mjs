@@ -293,7 +293,7 @@ export function buildApp({ store, guestReader = readGuestInput, guestReadTimeout
     const key = bearer(req);
     const me = Object.values(state.owners).find((o) => key && sameHash(o.token_hash, sha256(key)));
     if (!me) throw new HttpError(401, 'unauthorized', 'Card key required');
-    me.last_seen = Date.now();   // the owner's assistant is checking in (memory only)
+    if (req.headers['x-roloe-client'] === 'assistant') me.last_seen = Date.now();   // their assistant checking in, not their /me page
     const list = Object.values(state.encounters)
       .filter((e) => (e.a === me.owner || e.b === me.owner) && (query.get('all') || e.status === 'open'))
       .sort((x, y) => y.times.tap - x.times.tap)
