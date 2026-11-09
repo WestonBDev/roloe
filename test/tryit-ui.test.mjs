@@ -101,3 +101,36 @@ test('Try it page: a finding without a change says so; Docker down or a broken r
     }
   } finally { await s.close(); }
 });
+
+test('Ctrl-C on an open Try it page deletes the throwaway copy (Gitar)', async () => {
+  const { spawn } = await import('node:child_process');
+  const s = await startTestServer();
+  const dir = mkdtempSync(join(tmpdir(), 'roloe-ui3-'));
+  const git = (...a) => execFileSync('git', ['-C', dir, ...a], { stdio: 'ignore' });
+  git('init', '-q'); git('config', 'user.email', 't@example.com'); git('config', 'user.name', 't');
+  writeFileSync(join(dir, 'a.js'), 'const a = 1;\n');
+  git('add', '.'); git('commit', '-qm', 'init');
+  try {
+    const reg = async (owner, passages) => {
+      const { body: { key } } = await s.call('POST', '/api/owners', { owner, name: owner });
+      const auth = { authorization: `Bearer ${key}` };
+      await s.call('POST', `/api/cards/${owner}/switch`, { on: true }, auth);
+      await s.call('PUT', `/api/cards/${owner}`, { passages }, auth);
+      return { auth, key };
+    };
+    const P = (id, text) => ({ passage_id: id, kind: 'session', speaker: 'owner', source: 's', locator: id, ts: new Date().toISOString(), text });
+    const giver = await reg('gus', [P('p-a00001', 'set a to two before shipping it')]);
+    const me = await reg('rob', [P('p-b00001', 'a is one')]);
+    const { body: { id } } = await s.call('POST', '/api/tap', { to: 'rob' }, giver.auth);
+    await s.call('POST', `/api/e/${id}/findings`, { findings: [{ cites: 'p-a00001', quote: 'set a to two', what: 'w', change: { edits: [{ file: 'a.js', find: '1', replace: '2' }] } }] }, giver.auth);
+    const script = `import { startTryUi } from ${JSON.stringify(new URL('../src/tryit-ui.mjs', import.meta.url).href)};
+      const ui = await startTryUi({ cfg: { url: ${JSON.stringify(s.base)}, key: ${JSON.stringify(me.key)}, owner: 'rob', project: ${JSON.stringify(dir)} }, encounterId: ${JSON.stringify(id)}, port: 0 });
+      console.log('COPY ' + ui.copyPath); setInterval(() => {}, 1000);`;
+    const child = spawn('node', ['--input-type=module', '-e', script], { stdio: ['ignore', 'pipe', 'inherit'] });
+    const copyPath = await new Promise((resolve) => child.stdout.on('data', (d) => { const m = String(d).match(/COPY (\S+)/); if (m) resolve(m[1]); }));
+    assert.ok(existsSync(copyPath));
+    child.kill('SIGINT');
+    await new Promise((r) => child.on('exit', r));
+    assert.ok(!existsSync(copyPath), 'copy deleted on Ctrl-C');
+  } finally { await s.close(); }
+});
