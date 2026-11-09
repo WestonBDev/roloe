@@ -20,7 +20,7 @@ import { secretShaped } from './scrub.mjs';
 import { gate } from './gate.mjs';
 import { readFileSync, existsSync, openSync, readSync, closeSync, statSync } from 'node:fs';
 import QRCode from 'qrcode';
-import { randomBytes } from 'node:crypto';
+import { randomBytes, createHash } from 'node:crypto';
 import { newId } from './state.mjs';
 
 const KINDS = new Set(['session', 'file', 'commit', 'link']);
@@ -217,6 +217,7 @@ export function buildApp({ store, guestReader = readGuestInput, guestReadTimeout
   });
 
   // ---------- The card: one switch, and exactly what is shared ----------
+  const cardDigest = new Map();   // owner -> digest of the last card written (memory only)
   r.add('PUT', '/api/cards/:owner', async ({ req, res, params, span }) => {
     const o = authOwner(req, params.owner);
     if (!o.sharing) throw new HttpError(409, 'switch_off', 'Sharing is off. Turn the switch on first.');
@@ -247,6 +248,15 @@ export function buildApp({ store, guestReader = readGuestInput, guestReadTimeout
         text: s.text,
       });
     }
+    // Assistants re-upload on a timer. Unchanged since the last good write: skip the store, so the
+    // same passages aren't rewritten and re-embedded every few minutes (that spent the quota).
+    const digest = createHash('sha256').update(JSON.stringify([o.name, passages.map(({ ts, ...p }) => p)])).digest('hex');
+    const last = cardDigest.get(o.owner);
+    if (last?.digest === digest && Date.now() - last.at < 30 * 60e3 && o.card?.passages === passages.length) {   // rewritten at least every 30 min anyway
+      span.setAttributes({ 'roloe.owner': o.owner, 'roloe.card.passages': passages.length, 'roloe.card.unchanged': true });
+      return send(res, 200, { owner: o.owner, passages: passages.length, private: o.private.length, rescrubbed, unchanged: true });
+    }
+    cardDigest.delete(o.owner);
     await store.replaceCard(o.owner, o.name, passages);
     if (!o.sharing) { await store.replaceCard(o.owner, o.name, []); throw new HttpError(409, 'switch_off', 'Sharing went off during the upload.'); }
     const t = body.totals || {};
@@ -256,6 +266,7 @@ export function buildApp({ store, guestReader = readGuestInput, guestReadTimeout
       scope: cleanLine(body.scope || '', 80),
       updated: new Date().toISOString(),
     };
+    cardDigest.set(o.owner, { digest, at: Date.now() });
     save();
     span.setAttributes({ 'roloe.owner': o.owner, 'roloe.card.passages': passages.length, 'roloe.card.rescrubbed': rescrubbed });
     send(res, 200, { owner: o.owner, passages: passages.length, private: o.private.length, rescrubbed });
@@ -265,6 +276,7 @@ export function buildApp({ store, guestReader = readGuestInput, guestReadTimeout
     const o = authOwner(req, params.owner);
     const { on } = await readJson(req);
     o.sharing = Boolean(on);
+    cardDigest.delete(o.owner);
     if (!o.sharing) {
       await store.replaceCard(o.owner, o.name, []);   // off empties the card at once
       o.card = { ...o.card, passages: 0, updated: new Date().toISOString() };
@@ -284,6 +296,7 @@ export function buildApp({ store, guestReader = readGuestInput, guestReadTimeout
     const { passage_id: id, private: priv = true } = await readJson(req);
     if (!/^p-[0-9a-f]{6}$/.test(String(id))) throw new HttpError(400, 'bad_passage', 'passage_id required');
     o.private = o.private.filter((x) => x !== id);
+    cardDigest.delete(o.owner);
     o.private_fp ||= {};
     if (!priv) delete o.private_fp[id];
     if (priv) {
