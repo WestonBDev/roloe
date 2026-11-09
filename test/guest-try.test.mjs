@@ -275,3 +275,30 @@ test('a runner only sweeps clones from its own coordinator, not another one serv
     rmSync(theirs, { recursive: true, force: true });
   } finally { await s.close(); }
 });
+
+test('a Try it run whose runner died (no word for 6 minutes) goes back to approved, so another runner runs it', async () => {
+  const s = await startTestServer();
+  try {
+    const { wes } = await twoCards(s);
+    const m = await guestRepoMeeting(s);
+    const { g, call } = m;
+    await call('POST', `/api/e/${g.id}/findings`, { findings: [{ cites: 'p-e00001', quote: 'card watcher records refresh as done', about: 'p-b00001', what: 'a', change: { edits: [{ file: 'pkg/retry.js', find: '(fn) => fn()', replace: '(fn) => fn() ?? 1' }] } }] }, wes);
+    const f = (await call('GET', `/api/e/${g.id}?k=${g.key}`)).body.findings[0];
+    const giver = (b) => call('POST', `/api/e/${g.id}/guest-try`, { finding: f.id, ...b }, wes);
+    assert.equal((await giver({ state: 'preparing' })).status, 200);
+    assert.equal((await giver({ state: 'review', diff: '--- a\n+++ b\n', test_command: 'npm test' })).status, 200);
+    await call('POST', `/api/e/${g.id}/try-approve?k=${g.key}`, { finding: f.id });
+    assert.equal((await giver({ state: 'installing' })).status, 200);
+    const jobs = async () => (await s.call('GET', '/api/me/try-jobs', null, wes)).body.jobs.filter((j) => j.encounter_id === g.id);
+    assert.equal((await jobs())[0].state, 'installing', 'a live run is left alone');
+    const live = s.state().encounters[g.id].findings[0];
+    live.try.at = Date.now() - 7 * 60e3;   // its runner went quiet
+    const [j] = await jobs();
+    assert.equal(j.state, 'approved');
+    assert.equal(j.approved_diff, '--- a\n+++ b\n', 'the retry runs exactly what the guest approved');
+    assert.equal((await giver({ state: 'installing' })).status, 200, 'another runner can claim it');
+    live.try.at = Date.now() - 7 * 60e3; live.try.state = 'testing';
+    assert.equal((await jobs())[0].state, 'approved', 'stuck while testing too');
+    m.close();
+  } finally { await s.close(); }
+});
