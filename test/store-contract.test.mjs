@@ -48,6 +48,9 @@ for (const [name, make] of targets) {
       assert.equal(await store.get(k1.id, 'p-c00001'), null, 'Cat was never tapped in e1');
       assert.equal((await store.get(k1.id, 'p-a00001')).owner_id, a);
       assert.equal((await store.list(k1.id, b)).length, 2);
+      // Many by id in one call, still inside the meeting's scope (Cat's passage isn't in e1).
+      const many = await store.getMany(k1.id, ['p-a00001', 'p-b00001', 'p-c00001', 'p-ffffff']);
+      assert.deepEqual(many.map((d) => d.passage_id).sort(), ['p-a00001', 'p-b00001']);
 
       const hits = await store.search(k1.id, 'search scores embedding model upgrade', { owner: b, k: 5 });
       assert.equal(hits[0].passage_id, 'p-b00001');

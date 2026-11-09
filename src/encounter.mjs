@@ -26,7 +26,7 @@ export async function createEncounter(store, a, b, { guest = null, guestPassages
     times: { tap: now, ready: null, first_findings: null, all_findings: null, green: null },
     overlap: {}, keyId: null, trace: null, closed: null,
   };
-  enc.trace = startEncounterTrace(id, { 'roloe.guest': Boolean(guest) });
+  enc.trace = preset?.trace || startEncounterTrace(id, { 'roloe.guest': Boolean(guest) });
   const ref = { encounterId: id, ...enc.trace };
   try {
     await buildEncounter(store, enc, ref, a, b, guest, guestPassages);

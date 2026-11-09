@@ -13,7 +13,7 @@ import { openStore } from './store/index.mjs';
 import { createEncounter, inboxEntry, stageLink, sideLink, newSide } from './encounter.mjs';
 import { readGuestInput, parseGuestLink } from './guest-input.mjs';
 import { checkFinding } from './checks.mjs';
-import { step, hmac, destroyHmacKey, endEncounterTrace } from './telemetry.mjs';
+import { step, hmac, destroyHmacKey, endEncounterTrace, startEncounterTrace } from './telemetry.mjs';
 import { secretShaped } from './scrub.mjs';
 import { gate } from './gate.mjs';
 import { readFileSync, existsSync, openSync, readSync, closeSync, statSync } from 'node:fs';
@@ -308,9 +308,11 @@ export function buildApp({ store, guestReader = readGuestInput, guestReadTimeout
     const them = other(enc, me);
     const out = await step('roloe.pull', ref(enc), { 'roloe.giver': hmac(enc.id, me) }, async (span) => {
       const o = enc.overlap[me] || { theirs: [], mine: [] };
-      const fetchAll = async (ids) => (await Promise.all(ids.map((pid) => store.get(enc.keyId, pid)))).filter(Boolean);
-      const theirs = await fetchAll(o.theirs);
-      let mine = await fetchAll(o.mine);
+      // One request for every passage in the pull (Dash0 showed one search per passage).
+      const docs = await store.getMany(enc.keyId, [...o.theirs, ...o.mine]);
+      const pick = (ids, owner) => ids.map((pid) => docs.find((d) => d.passage_id === pid && d.owner_id === owner)).filter(Boolean);
+      const theirs = pick(o.theirs, them);
+      let mine = pick(o.mine, me);
       if (!mine.length) mine = (await store.list(enc.keyId, me)).filter((p) => p.speaker === 'owner' || p.kind === 'commit').slice(0, 8);
       // Every passage served must belong to this encounter; the store enforces it, this re-checks.
       const scopeOk = [...theirs, ...mine].every((p) => p.encounter_id === enc.id);
@@ -367,13 +369,17 @@ export function buildApp({ store, guestReader = readGuestInput, guestReadTimeout
     }
 
     async function postFindings(span, them, submitted) {
+      // Every cited and "about" passage in one request, then the checks read from that.
+      const ids = submitted.flatMap((f) => [f?.cites, f?.about]).filter((x) => /^p-[0-9a-f]{6}$/.test(String(x)));
+      const docs = ids.length ? await store.getMany(enc.keyId, ids) : [];
+      const lookup = async (pid, owner) => docs.find((d) => d.passage_id === pid && (!owner || d.owner_id === owner)) || null;
       const out = [];
       const kept = [];
       const dropped = [];
       let accepted = 0;
       for (const [i, f] of submitted.entries()) {
         const v = await step('roloe.finding.check', ref(enc), { 'roloe.finding.index': i }, async (cs) => {
-          const r = await checkFinding(f, { get: (pid, owner) => store.get(enc.keyId, pid, owner), giver: me, recipient: them, canaries: state.canaries });
+          const r = await checkFinding(f, { get: lookup, giver: me, recipient: them, canaries: state.canaries });
           if (r.accepted && accepted >= 3) { r.accepted = false; r.reason = 'more than 3'; }
           cs.setAttributes({ 'roloe.check.citation': r.checks.citation, 'roloe.check.quote': r.checks.quote, 'roloe.check.about': r.checks.about, 'roloe.check.gate': r.checks.gate, 'roloe.check.accepted': r.accepted, 'roloe.check.reason': r.reason || 'ok', 'roloe.cites_hmac': f?.cites ? hmac(enc.id, String(f.cites)) : '' });
           return r;
@@ -485,6 +491,8 @@ export function buildApp({ store, guestReader = readGuestInput, guestReadTimeout
       // and copies nothing (or removes what it just made).
       enc.status = 'closed';
       enc.closed = { at: new Date().toISOString(), by: me, deleted: 0, query_after_stop: 0, before_open: true };
+      endEncounterTrace(enc.id, { 'roloe.closed': true, 'roloe.closed_before_open': true });
+      destroyHmacKey(enc.id);
       save();
       return send(res, 200, enc.closed);
     }
@@ -547,6 +555,8 @@ export function buildApp({ store, guestReader = readGuestInput, guestReadTimeout
     // card and finding the overlap happen behind it; the assistant sees the meeting when it's ready.
     const tap = Date.now();
     const preset = { id: newId('e', 5), tap, stageKey: newKey('stk'), sides: { [o.owner]: newSide(), [guest.owner]: newSide() } };
+    // The meeting's trace starts at the scan, so reading their link is part of it (not an orphan trace).
+    preset.trace = startEncounterTrace(preset.id, { 'roloe.guest': true });
     const enc = {
       id: preset.id, a: o.owner, b: guest.owner, names: { [o.owner]: o.name, [guest.owner]: guest.name }, created: new Date(tap).toISOString(),
       status: 'preparing', guest: { link: link || null, kind: link ? 'reading' : (b.text ? 'text' : 'none') }, same_person: false,
@@ -557,7 +567,7 @@ export function buildApp({ store, guestReader = readGuestInput, guestReadTimeout
     save();
     (async () => {
       try {
-        const input = await step('roloe.guest_read', null, { 'roloe.guest.has_link': Boolean(link), 'roloe.guest.has_text': Boolean(b.text) }, async (sp) => {
+        const input = await step('roloe.guest_read', { encounterId: preset.id, ...preset.trace }, { 'roloe.guest.has_link': Boolean(link), 'roloe.guest.has_text': Boolean(b.text) }, async (sp) => {
           // A hard cap: whatever happens out there, the meeting opens.
           let timer;
           const late = new Promise((res) => { timer = setTimeout(() => res({ kind: b.text ? 'text' : 'none', passages: [], error: 'Couldn\'t read that link in time; the meeting goes on without it.', late: true }), guestReadTimeoutMs); });
@@ -566,7 +576,7 @@ export function buildApp({ store, guestReader = readGuestInput, guestReadTimeout
           sp.setAttributes({ 'roloe.guest.kind': r.kind, 'roloe.guest.passages': r.passages.length, 'roloe.guest.read_ok': !r.error });
           return r;
         });
-        if (enc.status !== 'preparing') return;   // stopped while their link was being read
+        if (enc.status !== 'preparing') return;   // stopped while their link was being read (its trace already closed)
         const created = await createEncounter(store, o, guest, {
           preset,
           guest: { link: link || null, kind: input.kind, error: input.error, repo: input.repo || null, ref: input.ref || null, path: input.path || null, files: input.files ?? null, passages: input.passages.length },
@@ -576,10 +586,13 @@ export function buildApp({ store, guestReader = readGuestInput, guestReadTimeout
           // Stopped while the meeting was being built: undo it and keep the stop.
           await store.invalidateKey(created.keyId).catch(() => {});
           await store.deleteEncounter(created.id).catch(() => {});
+          destroyHmacKey(created.id);   // the build re-created it after Stop destroyed it
+          endEncounterTrace(created.id, { 'roloe.closed': true });
           state.encounters[enc.id] = enc;
           save();
         }
       } catch (e) {
+        endEncounterTrace(enc.id, { 'roloe.failed': true, 'error.type': e.code || e.name || 'error' });
         enc.status = 'failed';
         enc.guest.error = 'This meeting could not be opened. Scan the card again to retry.';
         console.error('[roloe] guest start failed', e.code || e.name);
