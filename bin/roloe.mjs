@@ -85,9 +85,32 @@ const commands = {
     out('(This link holds your card key. Open it on your own phone or laptop only.)');
   },
 
+  // MCP server for Claude Code / Codex (stdio).
+  async mcp() {
+    const { runMcp } = await import('../src/mcp.mjs');
+    await runMcp();
+  },
+
+  async inbox() {
+    const cfg = cfgFor();
+    const r = await api(cfg, 'GET', '/api/me/encounters');
+    if (!r.encounters.length) return out('No open meetings.');
+    for (const e of r.encounters) out(`${e.id}  with ${e.with_name}${e.guest ? ' (guest)' : ''}  ${e.posted ? 'posted' : 'not posted yet'}  ${e.link}`);
+  },
+
+  async tap() {
+    const cfg = cfgFor();
+    if (!pos[0]) throw new Error('Usage: roloe tap <their card name>');
+    const r = await api(cfg, 'POST', '/api/tap', { to: pos[0] });
+    out(`Tapped ${r.with}: meeting ${r.id} (ready in ${r.ready_ms} ms)`);
+    out(`Your page: ${r.link}`);
+    out(`Stage:     ${r.stage}`);
+  },
+
   async help() {
     out(`roloe on --owner <name> --name "<Name>" --project <dir> [--url <coordinator>]
-roloe off | refresh | show [--all|--json] | private <passage_id> [--undo] | me`);
+roloe off | refresh | show [--all|--json] | private <passage_id> [--undo] | me
+roloe tap <name> | inbox | mcp`);
   },
 };
 
