@@ -85,7 +85,8 @@ export function elasticStore({ esUrl, esUser, esPassword, esApiKey, esIndex, fet
     if (!id || resting(id)) return false;
     try {
       const r = await esRaw('POST', `/_inference/${encodeURIComponent(id)}`, { input: PROBE }, { allow: [400, 403, 404, 408, 429, 500, 502, 503, 504] });
-      return r.status === 200;
+      if (r.status === 200) { dead.delete(id); return true; }
+      return false;
     } catch { return false; }
   }
   // Which endpoint an error names; if it names none, both are suspect.
@@ -97,6 +98,10 @@ export function elasticStore({ esUrl, esUser, esPassword, esApiKey, esIndex, fet
   }
   async function settleInference() {
     const [elser, jina] = await Promise.all([alive(mapped.semantic), alive(mapped.multilingual)]);
+    for (const [id, ok] of [[mapped.semantic, elser], [mapped.multilingual, jina]]) {
+      if (!id) continue;
+      if (ok) dead.delete(id); else if (!resting(id)) dead.set(id, Date.now());
+    }
     info.semantic = elser && Boolean(info.inference_id);
     info.multilingual = jina && Boolean(info.multilingual_inference_id);   // off by env: not queried, still embedded
     const want = [...(elser ? ['text_semantic'] : []), ...(jina ? ['text_jina'] : [])];
