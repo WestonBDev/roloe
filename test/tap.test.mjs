@@ -14,7 +14,7 @@ export async function twoCards(s) {
     await s.call('PUT', `/api/cards/${owner}`, { passages }, auth);
     return auth;
   };
-  const wes = await reg('wes', 'Wes', [P('p-w00001', 'card watcher records refresh as done before the push succeeds'), P('p-w00002', 'function refresh() { push(card); markDone(); }', 'file')]);
+  const wes = await reg('wes', 'Wes', [P('p-e00001', 'card watcher records refresh as done before the push succeeds'), P('p-e00002', 'function refresh() { push(card); markDone(); }', 'file')]);
   const aiden = await reg('aiden', 'Aiden', [P('p-a00001', 'mark the combined total partial when one fetch fails to load, then retry the push'), P('p-a00002', 'pick a theme')]);
   return { wes, aiden };
 }
@@ -43,7 +43,7 @@ test('a tap copies both cards into the encounter, precomputes overlap both ways,
     assert.notEqual(inbox.body.encounters[0].link, link, 'each side has its own key');
 
     const enc = s.state().encounters[id];
-    assert.ok(enc.overlap.aiden.theirs.includes('p-w00001'), 'Aiden gives to Wes: overlap in Wes\'s passages');
+    assert.ok(enc.overlap.aiden.theirs.includes('p-e00001'), 'Aiden gives to Wes: overlap in Wes\'s passages');
     assert.ok(enc.overlap.aiden.mine.includes('p-a00001'));
     assert.ok(enc.times.ready >= enc.times.tap);
     assert.equal(await s.store.count(enc.keyId), 4);

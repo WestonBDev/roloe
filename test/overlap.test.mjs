@@ -10,7 +10,7 @@ test('pickQueries mixes owner words, assistant prose, commits and files, newest 
   for (let i = 0; i < 30; i++) ps.push(P(`p-o${String(i).padStart(4, '0')}`, `owner ${i}`, 'session', 'owner', i));
   for (let i = 0; i < 30; i++) ps.push(P(`p-a${String(i).padStart(4, '0')}`, `assistant ${i}`, 'session', 'assistant', i));
   for (let i = 0; i < 10; i++) ps.push(P(`p-c${String(i).padStart(4, '0')}`, `commit ${i}`, 'commit', 'owner', i));
-  for (let i = 0; i < 10; i++) ps.push(P(`p-f${String(i).padStart(4, '0')}`, `file ${i}`, 'file', '', i));
+  for (let i = 0; i < 10; i++) ps.push(P(`p-f${String(i).padStart(4, '0')}`, `module ${i}`, 'file', '', i));
   const q = pickQueries(ps);
   assert.equal(q.length, 40);
   const n = (pre) => q.filter((p) => p.passage_id.startsWith(pre)).length;
@@ -29,7 +29,7 @@ test('computeOverlap fuses ranks, reserves file slots, and ranks the giver passa
     P('p-m00003', 'mark the combined total partial when one game fails to load', 'session', 'owner'),
     P('p-m00004', 'lunch was good', 'session', 'owner'),
   ]);
-  const wes = [P('p-w00001', 'search scores dropped after we upgraded the embedding model'),
+  const wes = [P('p-w00001', 'search scores garbage after the embedding model upgrade, again'),
     P('p-w00002', 'export function refresh() { push(card); markDone(); } // push fails are ignored', 'file', ''),
     P('p-w00003', 'card watcher records refresh as done before push succeeds'),
     P('p-w00004', 'pick a font for the stage screen')];
