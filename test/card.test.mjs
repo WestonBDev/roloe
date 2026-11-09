@@ -34,3 +34,39 @@ test('the one switch: off refuses uploads and empties the card; on shows exactly
     assert.equal((await s.call('GET', '/api/cards/maya')).body.passages, 0);
   } finally { await s.close(); }
 });
+
+test('an upload still streaming when the switch goes off does not refill the card (Gitar)', async () => {
+  const s = await startTestServer();
+  try {
+    const http = await import('node:http');
+    const { body: { key } } = await s.call('POST', '/api/owners', { owner: 'race' });
+    const auth = { authorization: `Bearer ${key}` };
+    await s.call('POST', '/api/cards/race/switch', { on: true }, auth);
+    const body = JSON.stringify({ passages: [P('p-aaaaaa', 'streamed passage')] });
+    const u = new URL(s.base + '/api/cards/race');
+    const done = new Promise((resolve) => {
+      const req = http.request({ method: 'PUT', host: u.hostname, port: u.port, path: u.pathname, headers: { ...auth, 'content-type': 'application/json', 'content-length': Buffer.byteLength(body) } }, (res) => { res.resume(); res.on('end', () => resolve(res.statusCode)); });
+      req.write(body.slice(0, 10));
+      setTimeout(async () => { await s.call('POST', '/api/cards/race/switch', { on: false }, auth); req.end(body.slice(10)); }, 100);
+    });
+    assert.equal(await done, 409);
+    assert.equal((await s.call('GET', '/api/cards/race/passages', null, auth)).body.passages.length, 0);
+  } finally { await s.close(); }
+});
+
+test('a passage kept private stays off the card when its file shifts by a line (Gitar)', async () => {
+  const s = await startTestServer();
+  try {
+    const { body: { key } } = await s.call('POST', '/api/owners', { owner: 'priv' });
+    const auth = { authorization: `Bearer ${key}` };
+    await s.call('POST', '/api/cards/priv/switch', { on: true }, auth);
+    const lines = Array.from({ length: 10 }, (_, i) => `const secretPlan${i} = "launch the private roadmap item ${i}";`);
+    await s.call('PUT', '/api/cards/priv', { passages: [P('p-111111', lines.join('\n'), { kind: 'file', speaker: '' }), P('p-222222', 'public note about retries')] }, auth);
+    await s.call('POST', '/api/cards/priv/private', { passage_id: 'p-111111' }, auth);
+    // Next refresh: one line added at the top, so the window's text and ID both change.
+    const shifted = ['// a new header line', ...lines.slice(0, 9)].join('\n');
+    await s.call('PUT', '/api/cards/priv', { passages: [P('p-333333', shifted, { kind: 'file', speaker: '' }), P('p-222222', 'public note about retries')] }, auth);
+    const ids = (await s.call('GET', '/api/cards/priv/passages', null, auth)).body.passages.map((p) => p.passage_id);
+    assert.deepEqual(ids, ['p-222222']);
+  } finally { await s.close(); }
+});
