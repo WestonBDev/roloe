@@ -721,6 +721,8 @@ export async function start(port = config.port) {
   const store = await openStore();
   // Re-attach every open meeting's scope: a restart must not strand a guest's page or an assistant.
   for (const enc of Object.values(state.encounters)) {
+    // A guest meeting caught mid-preparation can't resume (their words were never stored): say so.
+    if (enc.status === 'preparing') { enc.status = 'failed'; enc.guest = { ...enc.guest, error: 'Roloe restarted while opening this meeting. Scan the card again.' }; continue; }
     if (enc.status !== 'open' || !enc.keyId) continue;
     try { enc.keyId = (await store.reattach(enc.id, enc.keyId)).id; } catch (e) { console.error('[roloe] could not re-attach', enc.id, e.code || e.name); }
   }
