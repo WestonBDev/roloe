@@ -136,13 +136,13 @@ test('a bad body never locks a side out, and a post that fails midway leaves not
     const { maya, id } = await tapped(s);
     const res = await fetch(`${s.base}/api/e/${id}/findings`, { method: 'POST', headers: { ...maya, 'content-type': 'application/json' }, body: 'null' });
     assert.equal(res.status, 400);
-    const get = s.store.get.bind(s.store);
-    let calls = 0;
-    s.store.get = async (...a) => { if (++calls === 3) throw Object.assign(new Error('network'), { code: 'es_timeout' }); return get(...a); };
+    // The store fails while the post is being checked (citations are fetched in one batch now).
+    const getMany = s.store.getMany.bind(s.store);
+    s.store.getMany = async () => { throw Object.assign(new Error('network'), { code: 'es_timeout' }); };
     const failed = await s.call('POST', `/api/e/${id}/findings`, { findings: [good, good, good] }, maya);
     assert.equal(failed.status, 500);
     assert.equal(s.state().encounters[id].findings.length, 0, 'no partial findings from the failed post');
-    s.store.get = get;
+    s.store.getMany = getMany;
     const ok = await s.call('POST', `/api/e/${id}/findings`, { findings: [good, good, good] }, maya);
     assert.equal(ok.status, 200);
     assert.equal(s.state().encounters[id].findings.length, 3);

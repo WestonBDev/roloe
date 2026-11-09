@@ -78,6 +78,10 @@ export function memoryStore({ dataDir } = {}) {
       const { _tokens, ...rest } = d;
       return rest;
     },
+    async getMany(keyId, ids) {
+      const want = new Set(ids);
+      return scope(keyId).filter((d) => want.has(d.passage_id)).map(({ _tokens, ...d }) => d);
+    },
     async list(keyId, owner) { return scope(keyId).filter((d) => !owner || d.owner_id === owner).map(({ _tokens, ...d }) => d); },
     async count(keyId) { try { return scope(keyId).length; } catch { return 0; } },
     async search(keyId, query, { owner, k = 5 } = {}) {

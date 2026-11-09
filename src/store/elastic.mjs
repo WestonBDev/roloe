@@ -197,6 +197,14 @@ export function elasticStore({ esUrl, esUser, esPassword, esApiKey, esIndex, fet
       const hits = await searchAs(keyId, { size: 1, query: scoped(k.encounter_id, [], [{ term: { passage_id: passageId } }, ...(owner ? [{ term: { owner_id: owner } }] : [])]) });
       return hits[0] ? strip(hits[0]) : null;
     },
+    // Many passages by id in one request (a pull, a post's citations), not one search each.
+    async getMany(keyId, ids) {
+      const k = keyAuth(keyId);
+      const uniq = [...new Set(ids)].slice(0, 200);
+      if (!uniq.length) return [];
+      const hits = await searchAs(keyId, { size: uniq.length * 2, _source: { excludes: ['text_semantic'] }, query: scoped(k.encounter_id, [], [{ terms: { passage_id: uniq } }]) });
+      return hits.map(strip);
+    },
     async list(keyId, owner) {
       const k = keyAuth(keyId);
       const hits = await searchAs(keyId, { size: 2000, query: scoped(k.encounter_id, [], owner ? [{ term: { owner_id: owner } }] : []) });
