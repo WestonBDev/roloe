@@ -33,6 +33,7 @@ test('serverless: API-key auth, semantic + RRF on, scope falls back to the coord
   assert.equal(d.license, 'serverless');
   assert.equal(d.rrf, 'elasticsearch');
   assert.equal(d.semantic, true);
+  assert.match(d.scope, /coordinator filter/, 'honest from startup, before any tap');
   assert.ok(calls.every((c) => c.auth === 'ApiKey main-key'));
   const put = calls.find((c) => c.method === 'PUT').body;
   assert.equal(put.settings, undefined, 'Serverless refuses shard and replica settings');
