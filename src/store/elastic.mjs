@@ -8,15 +8,16 @@
 const LICENSED = new Set(['trial', 'enterprise', 'platinum']);
 const SEMANTIC_CANDIDATES = ['.elser-2-elastic', '.elser-2-elasticsearch', '.multilingual-e5-small-elasticsearch'];
 
-export function elasticStore({ esUrl, esUser, esPassword, esIndex }) {
+export function elasticStore({ esUrl, esUser, esPassword, esApiKey, esIndex, fetchImpl = fetch }) {
   const base = esUrl.replace(/\/$/, '');
   const index = esIndex;
-  const basic = 'Basic ' + Buffer.from(`${esUser}:${esPassword}`).toString('base64');
+  const basic = esApiKey ? `ApiKey ${esApiKey}` : 'Basic ' + Buffer.from(`${esUser}:${esPassword}`).toString('base64');
   const keys = new Map(); // keyId -> { encoded, encounter_id, valid }  (memory only, never persisted)
+  let mintRefused = false; // serverless / API-key auth: keys with privileges can't be minted from a key
   const info = { store: 'elasticsearch', license: 'unknown', scope: 'coordinator filter', rrf: 'coordinator', semantic: false, inference_id: null };
 
   async function es(method, path, body, { auth = basic, ndjson = false, allow = [] } = {}) {
-    const res = await fetch(base + path, {
+    const res = await fetchImpl(base + path, {
       method,
       headers: { authorization: auth, 'content-type': ndjson ? 'application/x-ndjson' : 'application/json' },
       body: body === undefined ? undefined : ndjson ? body : JSON.stringify(body),
@@ -59,7 +60,7 @@ export function elasticStore({ esUrl, esUser, esPassword, esIndex }) {
 
   async function searchAs(keyId, body) {
     const k = keyAuth(keyId);
-    const { json } = await es('POST', `/${index}/_search`, body, { auth: `ApiKey ${k.encoded}` });
+    const { json } = await es('POST', `/${index}/_search`, body, { auth: k.encoded ? `ApiKey ${k.encoded}` : basic });
     return json.hits.hits.map(docOf);
   }
 
@@ -67,9 +68,16 @@ export function elasticStore({ esUrl, esUser, esPassword, esIndex }) {
     mode: 'elasticsearch',
     describe: () => ({ ...info }),
     async init() {
-      const lic = await es('GET', '/_license');
-      info.license = lic.json.license?.type || 'unknown';
-      const licensed = LICENSED.has(info.license) && lic.json.license?.status === 'active';
+      const lic = await es('GET', '/_license', undefined, { allow: [400, 404, 410] });
+      let licensed;
+      if (lic.status === 200) {
+        info.license = lic.json.license?.type || 'unknown';
+        licensed = LICENSED.has(info.license) && lic.json.license?.status === 'active';
+      } else {
+        const root = await es('GET', '/');
+        info.license = root.json.version?.build_flavor === 'serverless' ? 'serverless' : 'unknown';
+        licensed = info.license === 'serverless';
+      }
       info.scope = licensed ? 'document-level security key' : 'coordinator filter (Basic license refuses DLS)';
       info.rrf = licensed ? 'elasticsearch' : 'coordinator';
       const exists = await es('HEAD', `/${index}`, undefined, { allow: [404] });
@@ -123,18 +131,33 @@ export function elasticStore({ esUrl, esUser, esPassword, esIndex }) {
     async createEncounterKey(enc) {
       const priv = { names: [index], privileges: ['read'] };
       if (info.scope.startsWith('document-level')) priv.query = { term: { encounter_id: enc } };
-      const { json } = await es('POST', '/_security/api_key', {
-        name: `roloe-${enc}`, expiration: '1d',
-        role_descriptors: { roloe_encounter: { cluster: [], indices: [priv] } },
-        metadata: { roloe_encounter: enc },
-      });
-      keys.set(json.id, { encoded: json.encoded, encounter_id: enc, valid: true });
-      return { id: json.id };
+      if (!mintRefused) {
+        try {
+          const { json } = await es('POST', '/_security/api_key', {
+            name: `roloe-${enc}`, expiration: '1d',
+            role_descriptors: { roloe_encounter: { cluster: [], indices: [priv] } },
+            metadata: { roloe_encounter: enc },
+          });
+          keys.set(json.id, { encoded: json.encoded, encounter_id: enc, valid: true });
+          return { id: json.id };
+        } catch (e) {
+          // Only an API-key credential is expected to be refused (Elasticsearch won't derive a
+          // privileged key from one). With the elastic user's password, fail closed: never downgrade.
+          if (!esApiKey || ![400, 403].includes(e.status)) throw e;
+          mintRefused = true;
+          info.scope = 'coordinator filter (this cluster refuses to mint scoped keys from an API key)';
+        }
+      }
+      // No minted key: a coordinator-side handle that the encounter_id filter scopes, and that
+      // stop invalidates just the same.
+      const id = 'ck-' + enc + '-' + Math.random().toString(16).slice(2, 10);
+      keys.set(id, { encoded: null, encounter_id: enc, valid: true });
+      return { id };
     },
     async invalidateKey(id) {
       const k = keys.get(id);
       if (k) k.valid = false;
-      await es('DELETE', '/_security/api_key', { ids: [id] }, { allow: [404] });
+      if (k?.encoded) await es('DELETE', '/_security/api_key', { ids: [id] }, { allow: [404] });
     },
     async get(keyId, passageId, owner) {
       const k = keyAuth(keyId);
@@ -149,7 +172,7 @@ export function elasticStore({ esUrl, esUser, esPassword, esIndex }) {
     async count(keyId) {
       try {
         const k = keyAuth(keyId);
-        const { json } = await es('POST', `/${index}/_count`, { query: scoped(k.encounter_id) }, { auth: `ApiKey ${k.encoded}` });
+        const { json } = await es('POST', `/${index}/_count`, { query: scoped(k.encounter_id) }, { auth: k.encoded ? `ApiKey ${k.encoded}` : basic });
         return json.count;
       } catch { return 0; }
     },
@@ -157,6 +180,7 @@ export function elasticStore({ esUrl, esUser, esPassword, esIndex }) {
     // returns only the key's encounter.
     async countUnfiltered(keyId) {
       const k = keyAuth(keyId);
+      if (!k.encoded) return 'no minted key';
       const { json } = await es('POST', `/${index}/_count`, { query: { match_all: {} } }, { auth: `ApiKey ${k.encoded}` });
       return json.count;
     },
@@ -181,7 +205,7 @@ export function elasticStore({ esUrl, esUser, esPassword, esIndex }) {
           lines.push(JSON.stringify({ size: k, _source: { excludes: ['text_semantic'] }, query: scoped(key.encounter_id, [lexical], filter) }));
         }
       }
-      const { json } = await es('POST', `/${index}/_msearch`, lines.join('\n') + '\n', { auth: `ApiKey ${key.encoded}`, ndjson: true });
+      const { json } = await es('POST', `/${index}/_msearch`, lines.join('\n') + '\n', { auth: key.encoded ? `ApiKey ${key.encoded}` : basic, ndjson: true });
       return json.responses.map((r) => (r.hits?.hits || []).map(docOf));
     },
     async deleteEncounter(enc) {
