@@ -76,3 +76,22 @@ test('the scanner\'s own Roloe: a stack of the cards they scanned, kept on their
     assert.match(pj, /roloe\.wheel/, 'each meeting a phone joins is filed on that phone');
   } finally { await s.close(); }
 });
+
+test('phone pages: big targets, no leftover status dot, and your Roloe is a rotary file in 3D', async () => {
+  const s = await startTestServer();
+  try {
+    const css = await (await fetch(s.base + '/roloe.css')).text();
+    assert.match(css, /\[hidden\]\s*\{\s*display:\s*none\s*!important/, 'a hidden status line shows nothing, not even its dot');
+    assert.match(css, /button, \.btn \{ min-height: 60px/, 'thumb-sized buttons');
+    const g = await (await fetch(s.base + '/g/wes')).text();
+    assert.ok(!/usually within a minute|read only for this meeting, and deleted/.test(g), 'the scan page says only what the person needs to act');
+    assert.match(g, /id="send" class="wide"/);
+    const html = await (await fetch(s.base + '/r')).text();
+    assert.match(html, /preserve-3d/);
+    assert.match(html, /aria-roledescription="rotary card file"/);
+    const js = await (await fetch(s.base + '/wheel.js')).text();
+    assert.match(js, /angleFor/);
+    assert.match(html, /prefers-reduced-motion: reduce\) \{ \.leaf, \.leaf \.shade \{ transition: none/, 'reduced motion: the file jumps instead of turning');
+    assert.match(html, /transition: transform 440ms/, 'a turn is a compositor transition, never a repaint per frame');
+  } finally { await s.close(); }
+});

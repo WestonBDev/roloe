@@ -91,3 +91,28 @@ input[type=text], input[type=url], textarea { width: 100%; font: 400 17px/1.4 va
 .diff .meta { color: var(--pencil); font-weight: 600; }
 pre.output { font: 12px/1.45 var(--mono); max-height: 260px; overflow: auto; background: color-mix(in srgb, var(--ink) 6%, var(--stock)); padding: 12px; border-radius: 8px; white-space: pre-wrap; overflow-wrap: anywhere; }
 .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+
+/* Phone first. Big type, big targets, and nothing on the page that hasn't earned its place. */
+body { font-size: 19px; }
+header.top { font-size: 15px; margin-bottom: 10px; }
+.wordmark { font-size: 19px; }
+.card { padding: 54px 22px 34px; }
+.card h2 { font-size: 28px; line-height: 1.16; margin-bottom: 16px; }
+.card .who { font-size: 36px; line-height: 1.08; margin-bottom: 2px; }
+.card .quote { font-size: 34px; line-height: 1.1; }
+.card .quote.code { font-size: 15px; }
+.card .cite { font-size: 13px; }
+.state { font-size: 17px; }
+.label { font-size: 12px; }
+button, .btn { min-height: 60px; padding: 14px 28px; font-size: 20px; }
+button.wide, .btn.wide { width: 100%; }
+button.small, .btn.small { min-height: 44px; padding: 8px 16px; font-size: 15px; }
+button.quiet, .btn.quiet { min-height: 52px; font-weight: 500; color: var(--pencil); box-shadow: none; }
+input[type=text], input[type=url], textarea { font-size: 19px; min-height: 60px; padding: 16px; border-radius: 14px; }
+.card .verdict { font: 700 34px/1.1 var(--sans); color: var(--ok); margin: 6px 0 4px; }
+.card .verdict.bad { color: var(--bad); }
+details.card > summary { cursor: pointer; min-height: 44px; display: flex; align-items: center; font-weight: 600; color: var(--pencil); list-style: none; }
+details.card > summary::-webkit-details-marker { display: none; }
+details.card:not([open]) { padding-top: 46px; padding-bottom: 20px; }
+[hidden] { display: none !important; }   /* an empty status line must not leave its dot behind */
+.cite { font: 400 13px/1.6 var(--mono); color: var(--pencil); overflow-wrap: anywhere; }
