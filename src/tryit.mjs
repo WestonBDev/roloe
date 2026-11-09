@@ -70,8 +70,14 @@ export function parseCounts(out) {
 // Green: exit 0 and at least one test ran. A suite that runs nothing proves nothing.
 export const verdict = (code, counts) => (code === 0 && counts.passed > 0 && !counts.failed ? 'passed' : 'failed');
 
+// MCP servers can start with a bare environment: make sure git and docker are still found.
+export function toolPath() {
+  const extra = ['/opt/homebrew/bin', '/usr/local/bin', '/usr/bin', '/bin', '/usr/sbin', '/sbin', join(homedir(), '.colima', 'bin')];
+  return [...new Set([...(process.env.PATH || '').split(':').filter(Boolean), ...extra])].join(':');
+}
+
 export function dockerEnv() {
-  const env = { PATH: process.env.PATH, HOME: homedir() };
+  const env = { PATH: toolPath(), HOME: homedir() };
   const colima = join(homedir(), '.colima', 'default', 'docker.sock');
   env.DOCKER_HOST = process.env.DOCKER_HOST || (existsSync(colima) ? `unix://${colima}` : undefined);
   // A leftover Docker Desktop credsStore breaks every pull; use a clean client config.

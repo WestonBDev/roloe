@@ -28,6 +28,10 @@ export function nextMeeting(list, now = Date.now()) {
 }
 
 export async function runMcp() {
+  // Assistants may start MCP servers with a bare environment; git (card refresh, guest Try it)
+  // and docker (the sandbox) must still be found.
+  const { toolPath } = await import('./tryit.mjs');
+  process.env.PATH = toolPath();
   const cfg = loadConfig();
   const seen = new Set();          // encounters already surfaced to this session
   const server = new McpServer(
