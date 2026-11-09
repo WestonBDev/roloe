@@ -24,6 +24,10 @@ kind: Deployment
 metadata:
   name: app
   labels: { app: app }
+  annotations:
+    # Radar Checks: one replica is deliberate for now. Meeting state lives in the process and on a
+    # ReadWriteOnce volume, so a second replica would split it. Remove once state moves into Elasticsearch.
+    radarhq.io/ignore-checks: singleReplica
 spec:
   replicas: 1
   strategy: { type: Recreate }
@@ -33,6 +37,8 @@ spec:
     metadata:
       labels: { app: app }
     spec:
+      # The coordinator never calls the Kubernetes API (Radar Checks: service account token auto-mount).
+      automountServiceAccountToken: false
       securityContext:
         runAsNonRoot: true
         runAsUser: 1000
