@@ -12,7 +12,10 @@ delete process.env.ELASTIC_URL;
 export async function startTestServer() {
   const http = await import('node:http');
   const { buildApp } = await import('../src/coordinator.mjs');
-  const app = buildApp();
+  const { memoryStore } = await import('../src/store/memory.mjs');
+  const store = memoryStore();
+  await store.init();
+  const app = buildApp({ store });
   const server = http.createServer(app.handle);
   await new Promise((r) => server.listen(0, '127.0.0.1', r));
   const base = `http://127.0.0.1:${server.address().port}`;
@@ -22,5 +25,5 @@ export async function startTestServer() {
     let json; try { json = JSON.parse(text); } catch { json = text; }
     return { status: res.status, body: json };
   };
-  return { base, call, close: () => new Promise((r) => server.close(r)), dataDir: process.env.ROLOE_DATA_DIR };
+  return { base, call, close: () => new Promise((r) => server.close(r)), dataDir: process.env.ROLOE_DATA_DIR, store };
 }
