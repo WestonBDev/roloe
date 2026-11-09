@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Roloe · tap</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Caveat:wght@500&family=Familjen+Grotesk:wght@400;600;700&family=IBM+Plex+Mono:wght@400;600&display=swap">
+<link rel="stylesheet" href="/roloe.css">
+</head>
+<body>
+<header class="top"><span class="wordmark">Roloe</span><span class="muted">no app, no account</span></header>
+<main>
+  <article class="card" id="face"><span class="tab" id="tab">Opening…</span>
+    <h2 id="name" style="font-size:30px;margin-bottom:0">&nbsp;</h2>
+    <p class="quote" id="line" style="font-size:26px"></p>
+    <p class="cite" id="meta"></p>
+  </article>
+  <div id="as"></div>
+  <form class="card" id="start" hidden><span class="tab">Your side</span>
+    <label for="link"><h2>Paste a link to something you've built</h2></label>
+    <input id="link" type="url" inputmode="url" autocomplete="off" placeholder="https://github.com/you/project">
+    <p class="muted" style="font-size:14px;margin-top:8px">A public repo or post. Nothing about you is looked up unless you give it. Optional.</p>
+    <div class="row" style="margin-top:14px"><button type="submit" id="send">Send</button><button type="button" class="ghost" id="skip">Skip</button></div>
+  </form>
+  <p id="err" class="state bad" hidden></p>
+  <p class="muted" style="font-size:14px" id="how"></p>
+</main>
+<script type="module" src="/guest.js"></script>
+</body>
+</html>

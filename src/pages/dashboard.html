@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Roloe · today's counts</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Familjen+Grotesk:wght@400;600;700&family=IBM+Plex+Mono:wght@400;600&display=swap">
+<link rel="stylesheet" href="/roloe.css">
+<style>
+  main { max-width: 1100px; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 18px 22px; }
+  .grid .card { margin-top: 26px; padding-bottom: 26px; }
+  .n { font: 600 56px/1 var(--mono); font-variant-numeric: tabular-nums; margin: 6px 0 10px; }
+  .n.ok { color: var(--ok); }
+</style>
+</head>
+<body>
+<header class="top" style="max-width:1100px"><span class="wordmark">Roloe</span><span class="muted" id="upd"></span></header>
+<main>
+  <h1>Today's meetings, all of them</h1>
+  <p class="muted">Nothing strong, declined and failed are counted too. A side that never posts within 5 minutes counts as failed.</p>
+  <div class="grid" id="grid"></div>
+</main>
+<script type="module" src="/dashboard.js"></script>
+</body>
+</html>

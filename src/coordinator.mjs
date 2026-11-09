@@ -15,6 +15,7 @@ import { step, hmac, destroyHmacKey, endEncounterTrace } from './telemetry.mjs';
 import { secretShaped } from './scrub.mjs';
 import { gate } from './gate.mjs';
 import { readFileSync, existsSync } from 'node:fs';
+import QRCode from 'qrcode';
 import { randomBytes } from 'node:crypto';
 import { newId } from './state.mjs';
 
@@ -31,6 +32,17 @@ export function authOwner(req, ownerId) {
 export function publicCard(o) {
   return { owner: o.owner, name: o.name, line: o.line, sharing: o.sharing, passages: o.card?.passages || 0, updated: o.card?.updated || null };
 }
+
+const PAGES_DIR = new URL('./pages/', import.meta.url);
+const ASSETS = { 'roloe.css': 'text/css; charset=utf-8', 'stage.css': 'text/css; charset=utf-8', 'roloe.js': 'text/javascript; charset=utf-8',
+  'person.js': 'text/javascript; charset=utf-8', 'guest.js': 'text/javascript; charset=utf-8', 'stage.js': 'text/javascript; charset=utf-8',
+  'me.js': 'text/javascript; charset=utf-8', 'dashboard.js': 'text/javascript; charset=utf-8', 'card.js': 'text/javascript; charset=utf-8' };
+const pageCache = new Map();
+const PAGE = (file) => {
+  if (process.env.ROLOE_DEV || !pageCache.has(file)) pageCache.set(file, readFileSync(new URL(file, PAGES_DIR), 'utf8'));
+  return pageCache.get(file);
+};
+const CSP = "default-src 'self'; script-src 'self'; connect-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; frame-ancestors 'none'; base-uri 'none'; form-action 'self'";
 
 function ownerByKey(req) {
   const key = bearer(req);
@@ -83,6 +95,26 @@ export function buildApp({ store }) {
   const r = router();
 
   r.add('GET', '/healthz', ({ res }) => send(res, 200, { ok: true, otlp: otlpOn }));
+
+  // ---------- Pages and assets ----------
+  const page = (file) => ({ res }) => send(res, 200, PAGE(file), { 'content-type': 'text/html; charset=utf-8', 'content-security-policy': CSP });
+  r.add('GET', '/', page('index.html'));
+  r.add('GET', '/g/:owner', page('guest.html'));
+  r.add('GET', '/e/:id', page('person.html'));
+  r.add('GET', '/stage/:id', page('stage.html'));
+  r.add('GET', '/me/:owner', page('me.html'));
+  r.add('GET', '/c/:owner', page('card.html'));
+  r.add('GET', '/dashboard', page('dashboard.html'));
+  r.add('GET', '/:asset', ({ res, params }) => {
+    const type = ASSETS[params.asset];
+    if (!type) throw new HttpError(404, 'not_found', 'Not found');
+    send(res, 200, PAGE(params.asset), { 'content-type': type, 'cache-control': 'no-cache' });
+  });
+  r.add('GET', '/api/cards/:owner/qr.svg', async ({ res, params }) => {
+    if (!state.owners[params.owner]) throw new HttpError(404, 'no_card', 'No card by that name');
+    const svg = await QRCode.toString(`${config.publicUrl}/g/${params.owner}`, { type: 'svg', margin: 1, errorCorrectionLevel: 'M' });
+    send(res, 200, svg, { 'content-type': 'image/svg+xml' });
+  });
 
   // Register a card. The key is returned once; only its hash is kept.
   r.add('POST', '/api/owners', async ({ req, res, span }) => {

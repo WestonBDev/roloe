@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Roloe · your card</title>
+<meta name="robots" content="noindex">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Caveat:wght@500&family=Familjen+Grotesk:wght@400;600;700&family=IBM+Plex+Mono:wght@400;600&display=swap">
+<link rel="stylesheet" href="/roloe.css">
+<style>
+  .switch { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+  .toggle { width: 64px; height: 36px; border-radius: 999px; padding: 0; background: var(--rule); position: relative; flex: none; }
+  .toggle::after { content: ""; position: absolute; top: 4px; left: 4px; width: 28px; height: 28px; border-radius: 50%; background: var(--stock); box-shadow: 0 1px 3px rgba(0,0,0,.3); transition: transform .2s; }
+  .toggle[aria-checked="true"] { background: var(--ink); } .toggle[aria-checked="true"]::after { transform: translateX(28px); }
+  .totals { display: grid; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); gap: 4px 16px; }
+  .totals b { font: 600 22px/var(--pitch) var(--mono); display: block; }
+  .passage { border-top: 1px solid var(--rule); padding: 10px 0; display: grid; grid-template-columns: 1fr auto; gap: 6px 12px; align-items: start; }
+  .passage p { line-height: 1.45; font-size: 15px; overflow-wrap: anywhere; }
+  .passage .text { grid-column: 1 / -1; white-space: pre-wrap; max-height: 9.5em; overflow: hidden; }
+  .passage button { min-height: 36px; padding: 6px 12px; font-size: 14px; }
+  details > summary { cursor: pointer; min-height: 44px; display: flex; align-items: center; font-weight: 600; }
+</style>
+</head>
+<body>
+<header class="top"><span class="wordmark">Roloe</span><a id="cardlink" class="muted" href="#">your printable card</a></header>
+<main>
+  <article class="card"><span class="tab" id="tab">Your card</span>
+    <div class="switch"><h2 style="margin:0">Share today's work with people I tap</h2><button id="toggle" class="toggle" role="switch" aria-checked="false" aria-label="Share today's work with people I tap"></button></div>
+    <p class="muted" id="scope"></p>
+    <div class="totals" id="totals" style="margin-top:10px"></div>
+  </article>
+  <section id="meetings"></section>
+  <section><h2 style="font-size:20px">Exactly what is shared</h2><p class="muted" style="font-size:15px">Nothing you can't see here is ever shared. Keep anything private and it leaves the card at once.</p><div id="passages"></div></section>
+  <p id="err" class="state bad" hidden></p>
+</main>
+<script type="module" src="/me.js"></script>
+</body>
+</html>
