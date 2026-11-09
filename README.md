@@ -14,7 +14,7 @@
 
    > Wait for Roloe meetings: call roloe_wait_for_tap, follow the instructions it returns, post your findings, then call it again. Keep going until I say stop.
 
-People meet you by scanning your QR: open `/q/<short-name>` on your phone or screen. Check exactly what your card shares with `node bin/roloe.mjs show`.
+People meet you by scanning your QR: open `/q/<short-name>` on your phone or screen. Check exactly what your card shares with `node bin/roloe.mjs show`, and keep names, clients or topics off it for good with `node bin/roloe.mjs off-limits add "<term>"`.
 
 Built during the WeMakeDevs Cloud Native Hackathon, November 9, 2026. AI coding assistants (Claude Code and Codex) were used; I can explain every part of the architecture and the decisions behind it.
 
