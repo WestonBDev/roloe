@@ -56,3 +56,28 @@ test('roloe on registers, uploads a scrubbed card, and keeps the key and removed
     assert.equal((await s.call('GET', '/api/cards/tess')).body.passages, 0);
   } finally { await s.close(); }
 });
+
+test('roloe canary writes a never-shared file, registers it, and the gate then blocks it', async () => {
+  const s = await startTestServer();
+  const { home, project } = fixtureProject();
+  const env = { ...process.env, HOME: home, ROLOE_HOME: join(home, '.roloe') };
+  try {
+    await run('node', [BIN, 'on', '--url', s.base, '--owner', 'tess', '--name', 'Tess', '--project', project], { env });
+    const c = await run('node', [BIN, 'canary', '--owner', 'tess'], { env });
+    const value = c.stdout.match(/canary-[A-Z0-9]{20}/)[0];
+    const file = c.stdout.match(/written to (\S+)/)[1];
+    assert.ok(!file.startsWith(project), 'outside the shared project');
+    assert.equal(readFileSync(file, 'utf8').trim(), value);
+    assert.ok(s.state().canaries.includes(value));
+    const cfg = JSON.parse(readFileSync(join(home, '.roloe', 'tess.json'), 'utf8'));
+    assert.ok(cfg.removed.includes(value), 'the local gate knows it too');
+    // stop from the CLI ends a meeting for both sides
+    const { body: { key } } = await s.call('POST', '/api/owners', { owner: 'otto' });
+    await s.call('POST', '/api/cards/otto/switch', { on: true }, { authorization: `Bearer ${key}` });
+    const tap = await s.call('POST', '/api/tap', { to: 'otto' }, { authorization: `Bearer ${cfg.key}` });
+    const stop = await run('node', [BIN, 'stop', tap.body.id, '--owner', 'tess'], { env });
+    assert.match(stop.stdout, /Stopped/);
+    assert.match(stop.stdout, /query with the old key returns 0/);
+    assert.equal(s.state().encounters[tap.body.id].status, 'closed');
+  } finally { await s.close(); }
+});
