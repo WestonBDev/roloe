@@ -492,6 +492,8 @@ export function buildApp({ store, guestReader = readGuestInput, guestReadTimeout
       // and copies nothing (or removes what it just made).
       enc.status = 'closed';
       enc.closed = { at: new Date().toISOString(), by: me, deleted: 0, query_after_stop: 0, before_open: true };
+      endEncounterTrace(enc.id, { 'roloe.closed': true, 'roloe.closed_before_open': true });
+      destroyHmacKey(enc.id);
       save();
       return send(res, 200, enc.closed);
     }
@@ -575,7 +577,7 @@ export function buildApp({ store, guestReader = readGuestInput, guestReadTimeout
           sp.setAttributes({ 'roloe.guest.kind': r.kind, 'roloe.guest.passages': r.passages.length, 'roloe.guest.read_ok': !r.error });
           return r;
         });
-        if (enc.status !== 'preparing') return;   // stopped while their link was being read
+        if (enc.status !== 'preparing') return;   // stopped while their link was being read (its trace already closed)
         const created = await createEncounter(store, o, guest, {
           preset,
           guest: { link: link || null, kind: input.kind, error: input.error, repo: input.repo || null, ref: input.ref || null, path: input.path || null, files: input.files ?? null, passages: input.passages.length },
@@ -589,6 +591,7 @@ export function buildApp({ store, guestReader = readGuestInput, guestReadTimeout
           save();
         }
       } catch (e) {
+        endEncounterTrace(enc.id, { 'roloe.failed': true, 'error.type': e.code || e.name || 'error' });
         enc.status = 'failed';
         enc.guest.error = 'This meeting could not be opened. Scan the card again to retry.';
         console.error('[roloe] guest start failed', e.code || e.name);

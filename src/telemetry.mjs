@@ -84,6 +84,8 @@ export function startEncounterTrace(encounterId, attrs = {}) {
   const sc = span.spanContext();
   return { traceId: sc.traceId, spanId: sc.spanId };
 }
+export const openTraceCount = () => roots.size;
+
 export function endEncounterTrace(encounterId, attrs = {}) {
   const span = roots.get(encounterId);
   if (!span) return;
