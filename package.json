@@ -1,0 +1,27 @@
+{
+  "name": "roloe",
+  "version": "0.1.0",
+  "description": "A business card that brings your work. Tap, and the person in front of you gets the help you already have.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "bin": {
+    "roloe": "bin/roloe.mjs"
+  },
+  "scripts": {
+    "start": "node src/coordinator.mjs",
+    "test": "node --test --test-concurrency=1 test/*.test.mjs"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "1.32.2",
+    "@opentelemetry/api": "1.10.0",
+    "@opentelemetry/exporter-trace-otlp-http": "0.300.0",
+    "@opentelemetry/resources": "3.0.0",
+    "@opentelemetry/sdk-trace": "3.0.0",
+    "@opentelemetry/semantic-conventions": "1.43.0",
+    "qrcode": "1.5.4",
+    "zod": "4.6.7"
+  }
+}
