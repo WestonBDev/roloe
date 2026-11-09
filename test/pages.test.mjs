@@ -6,7 +6,7 @@ test('pages and assets are served with a strict CSP; the QR points at the guest 
   const s = await startTestServer();
   try {
     await twoCards(s);
-    for (const path of ['/g/wes', '/e/e-0000000000', '/stage/e-0000000000', '/me/wes', '/dashboard', '/c/wes', '/']) {
+    for (const path of ['/g/wes', '/e/e-0000000000', '/stage/e-0000000000', '/me/wes', '/dashboard', '/c/wes', '/', '/how']) {
       const r = await fetch(s.base + path);
       assert.equal(r.status, 200, path);
       assert.match(r.headers.get('content-type'), /text\/html/, path);
@@ -26,5 +26,15 @@ test('pages and assets are served with a strict CSP; the QR points at the guest 
     assert.match(qr.headers.get('content-type'), /image\/svg\+xml/);
     assert.match(await qr.text(), /<svg/);
     assert.equal((await fetch(s.base + '/api/cards/nobody/qr.svg')).status, 404);
+  } finally { await s.close(); }
+});
+
+test('the How it works page names the real components and the two trust zones', async () => {
+  const s = await startTestServer();
+  try {
+    const html = await (await fetch(s.base + '/how')).text();
+    for (const t of ['Roloe coordinator', 'no model, no logins', 'Elasticsearch', 'Dash0', 'roloe mcp', 'Try it', 'network none', "Each person's own machine and subscription", 'Roloe services: no model, no credentials', 'Card tap']) {
+      assert.ok(html.includes(t), t);
+    }
   } finally { await s.close(); }
 });
