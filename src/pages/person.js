@@ -40,6 +40,15 @@ function sealSection(v) {
 
 function waitSection(v) {
   const theirs = v.their_side;
+  if (v.status === 'preparing') {
+    return `<div class="card"><span class="tab">Opening your meeting with ${esc(v.their_name)}</span>
+      <h2>${v.guest_input?.kind === 'reading' ? 'Reading what you gave…' : 'Getting the cards side by side…'}</h2>
+      <p class="state wait">Keep talking. This takes a few seconds.</p></div>`;
+  }
+  if (v.status === 'failed') {
+    return `<div class="card"><span class="tab">Couldn't open</span><h2>${esc(v.guest_input?.error || 'This meeting could not be opened.')}</h2>
+      <p><a href="/g/${esc(v.them)}">Scan again</a></p></div>`;
+  }
   if (v.status !== 'open' || theirs.posted) return '';
   const n = Math.round((Date.now() - firstSeen) / 1000);
   return `<div class="card"><span class="tab">${esc(v.their_name)}'s assistant is reading</span>
@@ -115,7 +124,7 @@ function render(v) {
   draw.expect(expectSection(v));
   draw.thanks(thanksSection(v));
   if (draw.guest(guestSection(v))) wireProbe();
-  draw.receipt(v.status === 'open' ? receiptSection(v) : `<div class="card"><span class="tab">Stopped</span><p>This meeting was stopped${v.closed ? ` at ${esc(hhmm(v.closed.at))}` : ''}. Its key is revoked and its ${v.closed?.deleted ?? ''} shared copies are deleted; a query with the old key now returns ${v.closed?.query_after_stop ?? 0}.</p></div>`);
+  draw.receipt(v.status === 'open' ? receiptSection(v) : v.status !== 'closed' ? '' : `<div class="card"><span class="tab">Stopped</span><p>This meeting was stopped${v.closed ? ` at ${esc(hhmm(v.closed.at))}` : ''}. Its key is revoked and its ${v.closed?.deleted ?? ''} shared copies are deleted; a query with the old key now returns ${v.closed?.query_after_stop ?? 0}.</p></div>`);
 }
 
 function wireSeal(v) {

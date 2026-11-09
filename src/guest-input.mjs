@@ -211,6 +211,16 @@ async function readPage(p, opts) {
   return { passages: chunkLines(s.text, host, 'link', new Date().toISOString()).slice(0, 40), removed: s.removed.length };
 }
 
+// Plain words for the guest's phone, never raw status codes.
+function friendly(e, kind) {
+  const code = String(e.code || '');
+  if (code === 'not_public') return 'That link is not on the public internet, so Roloe won\'t read it.';
+  if (code === 'http_404' || code === 'no_path') return kind === 'github' ? 'That repo or folder wasn\'t found. Is it public?' : 'That page wasn\'t found.';
+  if (code === 'http_403' || code === 'http_429') return 'GitHub is limiting lookups right now. Try the repo link itself, a file link, or a sentence.';
+  if (code === 'not_https') return 'Only https links can be read.';
+  return kind === 'github' ? 'Couldn\'t read that repo just now.' : 'Couldn\'t read that page just now.';
+}
+
 export async function readGuestInput({ link, text } = {}, { fetchImpl = fetch, lookup = dnsLookup, timeoutMs = TIMEOUT_MS } = {}) {
   const deadline = Date.now() + timeoutMs;
   const opts = { fetchImpl, lookup, deadline };
@@ -231,7 +241,7 @@ export async function readGuestInput({ link, text } = {}, { fetchImpl = fetch, l
       Object.assign(out, { repo: r.repo || null, ref: r.ref || null, path: r.path || null, files: r.files ?? null, removed: r.removed || 0 });
       if (!r.passages.length) out.error = 'Nothing readable was found at that link.';
     } catch (e) {
-      out.error = e.code === 'not_public' ? 'That link is not on the public internet, so Roloe won\'t read it.' : `Couldn't read that link (${e.message}).`;
+      out.error = friendly(e, parsed.kind);
     }
   }
   return out;

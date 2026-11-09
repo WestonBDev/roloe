@@ -10,7 +10,7 @@ import { record, flushMetrics } from './metrics.mjs';
 const traceFileRef = traceFile;
 import { scrub } from './scrub.mjs';
 import { openStore } from './store/index.mjs';
-import { createEncounter, inboxEntry, stageLink, sideLink } from './encounter.mjs';
+import { createEncounter, inboxEntry, stageLink, sideLink, newSide } from './encounter.mjs';
 import { readGuestInput, parseGuestLink } from './guest-input.mjs';
 import { checkFinding } from './checks.mjs';
 import { step, hmac, destroyHmacKey, endEncounterTrace } from './telemetry.mjs';
@@ -533,17 +533,38 @@ export function buildApp({ store, guestReader = readGuestInput }) {
     const b = await readJson(req, 20_000);
     const link = String(b.link || '').trim().slice(0, 400);
     if (link && !parseGuestLink(link)) throw new HttpError(400, 'bad_link', 'Paste an https link, or write a sentence, or skip');
-    // Read what they gave, now that they've scanned: never before, and only into this meeting.
-    const input = await step('roloe.guest_read', null, { 'roloe.guest.has_link': Boolean(link), 'roloe.guest.has_text': Boolean(b.text) }, async (sp) => {
-      const r = await guestReader({ link, text: b.text });
-      sp.setAttributes({ 'roloe.guest.kind': r.kind, 'roloe.guest.passages': r.passages.length, 'roloe.guest.read_ok': !r.error });
-      return r;
-    });
     const guest = { owner: `guest-${randomBytes(3).toString('hex')}`, name: cleanName(b.name) || 'Guest' };
-    const enc = await createEncounter(store, o, guest, {
-      guest: { link: link || null, kind: input.kind, error: input.error, repo: input.repo || null, ref: input.ref || null, path: input.path || null, files: input.files ?? null, passages: input.passages.length },
-      guestPassages: input.passages,
-    });
+    // Answer the phone at once. Reading what they gave (never before they scanned), copying the
+    // card and finding the overlap happen behind it; the assistant sees the meeting when it's ready.
+    const tap = Date.now();
+    const preset = { id: newId('e', 5), tap, stageKey: newKey('stk'), sides: { [o.owner]: newSide(), [guest.owner]: newSide() } };
+    const enc = {
+      id: preset.id, a: o.owner, b: guest.owner, names: { [o.owner]: o.name, [guest.owner]: guest.name }, created: new Date(tap).toISOString(),
+      status: 'preparing', guest: { link: link || null, kind: link ? 'reading' : (b.text ? 'text' : 'none') }, same_person: false,
+      stageKey: preset.stageKey, sides: preset.sides, findings: [], dropped: [], tries: [], tryStatus: null, thanks: [],
+      times: { tap, ready: null, first_findings: null, all_findings: null, green: null }, overlap: {}, keyId: null, trace: null, closed: null,
+    };
+    state.encounters[enc.id] = enc;
+    save();
+    (async () => {
+      try {
+        const input = await step('roloe.guest_read', null, { 'roloe.guest.has_link': Boolean(link), 'roloe.guest.has_text': Boolean(b.text) }, async (sp) => {
+          const r = await guestReader({ link, text: b.text });
+          sp.setAttributes({ 'roloe.guest.kind': r.kind, 'roloe.guest.passages': r.passages.length, 'roloe.guest.read_ok': !r.error });
+          return r;
+        });
+        await createEncounter(store, o, guest, {
+          preset,
+          guest: { link: link || null, kind: input.kind, error: input.error, repo: input.repo || null, ref: input.ref || null, path: input.path || null, files: input.files ?? null, passages: input.passages.length },
+          guestPassages: input.passages,
+        });
+      } catch (e) {
+        enc.status = 'failed';
+        enc.guest.error = 'This meeting could not be opened. Scan the card again to retry.';
+        console.error('[roloe] guest start failed', e.code || e.name);
+        save();
+      }
+    })();
     span.setAttribute('roloe.encounter_id', enc.id);
     send(res, 201, { id: enc.id, key: enc.sides[guest.owner].key, link: sideLink(enc, guest.owner) });
   });

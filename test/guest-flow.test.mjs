@@ -5,7 +5,7 @@ import { spawn } from 'node:child_process';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { startTestServer, twoCards } from './helpers.mjs';
+import { startTestServer, twoCards, waitReady } from './helpers.mjs';
 import { elasticStore } from '../src/store/elastic.mjs';
 
 test('a guest\'s sentence becomes their side of the overlap; Weston\'s assistant gets both sides', async () => {
@@ -14,7 +14,7 @@ test('a guest\'s sentence becomes their side of the overlap; Weston\'s assistant
     const { wes } = await twoCards(s);
     const g = await s.call('POST', '/api/g/wes/start', { text: 'Our card watcher marks the refresh done before the push succeeds and I am stuck' });
     assert.equal(g.status, 201);
-    const view = (await s.call('GET', `/api/e/${g.body.id}?k=${g.body.key}`)).body;
+    const view = await waitReady(s, g.body.id, g.body.key);
     assert.equal(view.guest_input.kind, 'text');
     const pull = (await s.call('GET', `/api/e/${g.body.id}/pull`, null, wes)).body;
     assert.equal(pull.theirs.length, 1);
@@ -32,7 +32,7 @@ test('a link that can\'t be read still opens the meeting, and the guest is told 
     await twoCards(s);
     const g = await s.call('POST', '/api/g/wes/start', { link: 'https://localhost/private' });
     assert.equal(g.status, 201);
-    const view = (await s.call('GET', `/api/e/${g.body.id}?k=${g.body.key}`)).body;
+    const view = await waitReady(s, g.body.id, g.body.key);
     assert.match(view.guest_input.error, /public/);
   } finally { await s.close(); }
 });
@@ -72,6 +72,7 @@ test('a coordinator restart keeps the card and the guest\'s meeting page working
     await call('POST', '/api/cards/wes/switch', { on: true }, auth);
     await call('PUT', '/api/cards/wes', { passages: [{ passage_id: 'p-e00001', kind: 'session', speaker: 'owner', source: 's', locator: 'x', ts: new Date().toISOString(), text: 'card watcher records refresh as done before the push succeeds' }] }, auth);
     const g = await call('POST', '/api/g/wes/start', { text: 'my watcher marks refresh done too early' });
+    for (let i = 0; i < 100 && (await call('GET', `/api/e/${g.body.id}?k=${g.body.key}`)).body.status === 'preparing'; i++) await new Promise((r) => setTimeout(r, 30));
     p.kill('SIGTERM'); await new Promise((r) => p.on('exit', r));
     p = await boot();
     assert.equal((await call('GET', '/api/cards/wes')).status, 200, 'card survives');

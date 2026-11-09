@@ -95,7 +95,8 @@ test('never fetches private or local addresses, and a failed fetch is reported, 
     assert.match(r.error, /public/i, addr);
   }
   const down = await readGuestInput({ link: 'https://github.com/acme/gone' }, { fetchImpl: fakeFetch([]), lookup: publicDns });
-  assert.match(down.error, /404|read/i);
+  assert.match(down.error, /wasn't found|couldn't read/i);
+  assert.ok(!/\d{3}/.test(down.error), 'no status codes');
   assert.equal(down.passages.length, 0);
   assert.ok(down.error);
 });

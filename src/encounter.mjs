@@ -9,19 +9,19 @@ import { record } from './metrics.mjs';
 export const sideLink = (enc, who) => `${config.publicUrl}/e/${enc.id}?k=${enc.sides[who].key}`;
 export const stageLink = (enc) => `${config.publicUrl}/stage/${enc.id}?k=${enc.stageKey}`;
 
-function newSide() {
+export function newSide() {
   return { key: newKey('sk'), seal: null, posted: false, nothing_strong: false, retrieved_by_other: [], findings_seen: false };
 }
 
-export async function createEncounter(store, a, b, { guest = null, guestPassages = [] } = {}) {
-  const id = newId('e', 5);
-  const now = Date.now();
+export async function createEncounter(store, a, b, { guest = null, guestPassages = [], preset = null } = {}) {
+  const id = preset?.id || newId('e', 5);
+  const now = preset?.tap || Date.now();
   const enc = {
     id, a: a.owner, b: b.owner, names: { [a.owner]: a.name, [b.owner]: b.name },
     created: new Date(now).toISOString(), status: 'open', guest,
     // Two cards of one person: allowed as a labelled last resort, and every screen says so.
     same_person: Boolean(a.same_person_as === b.owner || b.same_person_as === a.owner || (a.same_person_as && a.same_person_as === b.same_person_as)),
-    stageKey: newKey('stk'), sides: { [a.owner]: newSide(), [b.owner]: newSide() },
+    stageKey: preset?.stageKey || newKey('stk'), sides: preset?.sides || { [a.owner]: newSide(), [b.owner]: newSide() },
     findings: [], dropped: [], tries: [], tryStatus: null, thanks: [],
     times: { tap: now, ready: null, first_findings: null, all_findings: null, green: null },
     overlap: {}, keyId: null, trace: null, closed: null,
