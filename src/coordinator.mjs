@@ -12,6 +12,7 @@ import { scrub } from './scrub.mjs';
 import { openStore } from './store/index.mjs';
 import { createEncounter, inboxEntry, stageLink, sideLink, newSide } from './encounter.mjs';
 import { readGuestInput, parseGuestLink } from './guest-input.mjs';
+import { forwardRum, rateLimiter } from './rum-proxy.mjs';
 import { checkFinding } from './checks.mjs';
 import { step, hmac, destroyHmacKey, endEncounterTrace, startEncounterTrace } from './telemetry.mjs';
 import { secretShaped } from './scrub.mjs';
@@ -54,7 +55,7 @@ const PAGES_DIR = new URL('./pages/', import.meta.url);
 const ASSETS = { 'roloe.css': 'text/css; charset=utf-8', 'stage.css': 'text/css; charset=utf-8', 'roloe.js': 'text/javascript; charset=utf-8',
   'person.js': 'text/javascript; charset=utf-8', 'guest.js': 'text/javascript; charset=utf-8', 'stage.js': 'text/javascript; charset=utf-8',
   'me.js': 'text/javascript; charset=utf-8', 'dashboard.js': 'text/javascript; charset=utf-8', 'card.js': 'text/javascript; charset=utf-8',
-  'qr.js': 'text/javascript; charset=utf-8', 'wheel.js': 'text/javascript; charset=utf-8' };
+  'qr.js': 'text/javascript; charset=utf-8', 'wheel.js': 'text/javascript; charset=utf-8', 'rum.js': 'text/javascript; charset=utf-8' };
 const pageCache = new Map();
 const PAGE = (file) => {
   if (process.env.ROLOE_DEV || !pageCache.has(file)) pageCache.set(file, readFileSync(new URL(file, PAGES_DIR), 'utf8'));
@@ -137,6 +138,27 @@ export function buildApp({ store, guestReader = readGuestInput, guestReadTimeout
     if (!type) throw new HttpError(404, 'not_found', 'Not found');
     send(res, 200, PAGE(params.asset), { 'content-type': type, 'cache-control': 'no-cache' });
   });
+  // Dash0 real-user monitoring: the SDK is served from our own node_modules, and its data comes
+  // back through here so the Dash0 token never reaches a browser.
+  let dash0Sdk = null;
+  r.add('GET', '/vendor/dash0.js', ({ res }) => {
+    dash0Sdk ||= readFileSync(new URL('../node_modules/@dash0/sdk-web/dist/dash0.js', import.meta.url), 'utf8');
+    send(res, 200, dash0Sdk, { 'content-type': 'text/javascript; charset=utf-8', 'cache-control': 'public, max-age=3600' });
+  });
+  const rumAllow = rateLimiter();
+  r.add('POST', '/rum/v1/:signal', async ({ req, res, params }) => {
+    const ip = process.env.ROLOE_TRUST_PROXY === '1' && req.headers['x-forwarded-for'] ? String(req.headers['x-forwarded-for']).split(',').pop().trim() : String(req.socket.remoteAddress || '');
+    if (!rumAllow(ip)) throw new HttpError(429, 'slow_down', 'Too many');
+    const chunks = [];
+    let size = 0;
+    for await (const c of req) { size += c.length; if (size > 600_000) throw new HttpError(413, 'too_large', 'Too large'); chunks.push(c); }
+    const headers = {};
+    if (config.dash0Token) headers.Authorization = `Bearer ${config.dash0Token}`;
+    if (config.dash0Dataset) headers['Dash0-Dataset'] = config.dash0Dataset;
+    const r2 = await forwardRum(params.signal, Buffer.concat(chunks).toString('utf8'), req.headers['content-type'], { endpoint: config.otlpEndpoint, headers }).catch(() => ({ status: 502 }));
+    res.writeHead(r2.status === 200 ? 200 : r2.status); res.end();
+  });
+
   r.add('GET', '/api/cards/:owner/qr.json', ({ res, params }) => {
     const o = state.owners[params.owner];
     if (!o) throw new HttpError(404, 'no_card', 'No card by that name');
