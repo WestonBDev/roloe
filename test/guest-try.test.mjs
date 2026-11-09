@@ -109,3 +109,55 @@ test('the giver\'s runner: clone, apply, literal diff, then the guest\'s own tes
     m.close();
   } finally { await s.close(); }
 });
+
+test('guest Try it hardening: runs only the diff the guest approved, cleans up after decline, refuses reports after Stop (Gitar)', async () => {
+  const { mkdtempSync, writeFileSync, mkdirSync, cpSync, existsSync, readdirSync } = await import('node:fs');
+  const { tmpdir, homedir } = await import('node:os');
+  const { join } = await import('node:path');
+  const { execFileSync } = await import('node:child_process');
+  const { runGuestTryOnce, forgetPrepared } = await import('../src/guest-try.mjs');
+  const src = mkdtempSync(join(tmpdir(), 'roloe-gsrc2-'));
+  const git = (...a) => execFileSync('git', ['-C', src, ...a], { stdio: 'ignore' });
+  git('init', '-q'); git('config', 'user.email', 't@example.com'); git('config', 'user.name', 't');
+  mkdirSync(join(src, 'pkg'), { recursive: true });
+  writeFileSync(join(src, 'pkg', 'retry.js'), 'export const retry = (fn) => fn();\n');
+  git('add', '.'); git('commit', '-qm', 'init');
+  const clone = async (job, dest) => { cpSync(src, dest, { recursive: true }); };
+  const s = await startTestServer();
+  try {
+    const { wes } = await twoCards(s);
+    const m = await guestRepoMeeting(s);
+    const { g, call } = m;
+    await call('POST', `/api/e/${g.id}/findings`, { findings: [
+      { cites: 'p-e00001', quote: 'card watcher records refresh as done', about: 'p-b00001', what: 'a', change: { edits: [{ file: 'pkg/retry.js', find: '(fn) => fn()', replace: '(fn) => fn() ?? 1' }] } },
+      { cites: 'p-e00001', quote: 'card watcher records refresh', about: 'p-b00001', what: 'b', change: { edits: [{ file: 'pkg/retry.js', find: 'export const', replace: 'export let' }] } },
+    ] }, wes);
+    const cfg = { url: m.base, key: s.keys.wes, owner: 'wes' };
+    await runGuestTryOnce(cfg, { clone });
+    const [f1, f2] = (await call('GET', `/api/e/${g.id}?k=${g.key}`)).body.findings;
+    // 1. Approved, then the runner restarts and the repo moves: the new diff doesn't match, so nothing runs.
+    await call('POST', `/api/e/${g.id}/try-approve?k=${g.key}`, { finding: f1.id });
+    forgetPrepared();
+    writeFileSync(join(src, 'pkg', 'retry.js'), 'export const retry = (fn) => fn(); // moved\n'); git('commit', '-qam', 'moved');
+    await runGuestTryOnce(cfg, { clone });
+    let v = (await call('GET', `/api/e/${g.id}?k=${g.key}`)).body;
+    assert.equal(v.findings[0].try.state, 'failed');
+    assert.match(v.findings[0].try.reason, /changed since you approved/);
+    // 2. Declined: the next pass removes the clone.
+    await call('POST', `/api/e/${g.id}/try-approve?k=${g.key}`, { finding: f2.id, decline: true });
+    await runGuestTryOnce(cfg, { clone });
+    const left = readdirSync(join(homedir(), '.cache', 'roloe')).filter((d) => d.startsWith(`guest-${g.id}`));
+    assert.deepEqual(left, [], 'no clone left behind');
+    // 3. After Stop, reports are refused.
+    await call('POST', `/api/e/${g.id}/stop?k=${g.key}`);
+    assert.equal((await call('POST', `/api/e/${g.id}/guest-try`, { finding: f2.id, state: 'review', diff: 'x' }, wes)).status, 410);
+    m.close();
+  } finally { await s.close(); }
+});
+
+test('the dependency install runs sandboxed too: no capabilities, no privilege gain, read-only root, its own cache', async () => {
+  const { installArgs } = await import('../src/tryit.mjs');
+  const a = installArgs({ dir: '/w-src', cacheDir: '/c', image: 'node:22-slim', cmd: 'npm ci --ignore-scripts', user: '501:20', name: 'x', cacheMount: '/tmp/.npm', cacheEnv: 'npm_config_cache' });
+  for (const flag of ['--cap-drop', 'ALL', '--security-opt', 'no-new-privileges', '--read-only', '--user']) assert.ok(a.includes(flag), flag);
+  assert.ok(!a.includes('--network'), 'the install keeps the network; only the test run drops it');
+});
