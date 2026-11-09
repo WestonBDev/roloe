@@ -54,3 +54,32 @@ test('a failed write is never remembered as the last good upload', async () => {
     assert.equal(writes, 2, 'the retry is written, not skipped');
   } finally { await s.close(); }
 });
+
+test('a skipped upload still refreshes totals and "updated"; overlapping uploads never remember the wrong card (Gitar)', async () => {
+  const s = await startTestServer();
+  try {
+    const { wes } = await twoCards(s);
+    const card = [P('p-c00001', 'retry loops need a finite overall deadline')];
+    await s.call('PUT', '/api/cards/wes', { passages: card, totals: { sessions: 1 } }, wes);
+    const before = s.state().owners.wes.card.updated;
+    await new Promise((r) => setTimeout(r, 5));
+    const r = await s.call('PUT', '/api/cards/wes', { passages: card, totals: { sessions: 7 }, scope: 'two repos' }, wes);
+    assert.equal(r.body.unchanged, true);
+    assert.equal(s.state().owners.wes.card.totals.sessions, 7);
+    assert.equal(s.state().owners.wes.card.scope, 'two repos');
+    assert.notEqual(s.state().owners.wes.card.updated, before);
+
+    // A (card X) starts, B (card Y) starts and finishes first, then A finishes: X must not be remembered.
+    const orig = s.store.replaceCard.bind(s.store);
+    let writes = 0;
+    s.store.replaceCard = async (owner, name, ps) => { writes++; if (ps[0]?.text === 'X') await new Promise((res) => setTimeout(res, 150)); return orig(owner, name, ps); };
+    const X = [P('p-c00009', 'X')], Y = [P('p-c00009', 'Y')];
+    const a = s.call('PUT', '/api/cards/wes', { passages: X }, wes);
+    await new Promise((res) => setTimeout(res, 20));
+    await s.call('PUT', '/api/cards/wes', { passages: Y }, wes);
+    await a;
+    const n = writes;
+    await s.call('PUT', '/api/cards/wes', { passages: X }, wes);
+    assert.equal(writes, n + 1, 'X is written again, not skipped against a store that may hold Y');
+  } finally { await s.close(); }
+});
