@@ -2,7 +2,7 @@
 // encounter's root span. Spans carry IDs, counts and HMACs only.
 import { config } from './env.mjs';
 import { state, save, newId, newKey } from './state.mjs';
-import { startEncounterTrace, endEncounterTrace, destroyHmacKey, step, hmac } from './telemetry.mjs';
+import { startEncounterTrace, endEncounterTrace, destroyHmacKey, step, hmac, logEvent } from './telemetry.mjs';
 import { computeOverlap } from './overlap.mjs';
 import { gate } from './gate.mjs';
 import { tokens } from './store/text.mjs';
@@ -32,6 +32,8 @@ export async function createEncounter(store, a, b, { guest = null, guestPassages
   const ref = { encounterId: id, ...enc.trace };
   try {
     await buildEncounter(store, enc, ref, a, b, guest, guestPassages);
+    logEvent('meeting.started', { ref, attrs: { 'roloe.guest': Boolean(guest) } });
+    if (enc.instant) logEvent('meeting.instant_shown', { ref, attrs: { 'roloe.instant.kind': enc.instant.kind } });
   } catch (e) {
     // Leave nothing half-built: no copies, no live key, no open record.
     if (enc.keyId) await store.invalidateKey(enc.keyId).catch(() => {});

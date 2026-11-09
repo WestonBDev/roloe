@@ -93,7 +93,7 @@ const logger = loggerProvider.getLogger('roloe', '0.1.0');
 // The only log bodies there are. A fixed list, so a guest's words can never become a log line.
 const LOG_EVENTS = new Set([
   'meeting.started', 'meeting.instant_shown', 'meeting.findings_posted', 'meeting.nothing_strong',
-  'meeting.stopped', 'meeting.expired', 'meeting.failed', 'guest.input_read', 'guest.input_failed',
+  'meeting.stopped', 'meeting.failed', 'guest.input_read', 'guest.input_failed',
   'guest_try.state', 'http.server_error',
 ]);
 const SEVERITY = { DEBUG: 5, INFO: 9, WARN: 13, ERROR: 17 };
@@ -194,10 +194,11 @@ export async function childSpan(name, attrs, fn) {
 }
 
 // One meeting event. Inside a step it is that step's log; otherwise the meeting's root span's.
-export function logEvent(event, { ref, severity = 'INFO', attrs = {} } = {}) {
+export function logEvent(event, { ref, span, severity = 'INFO', attrs = {} } = {}) {
   if (!LOG_EVENTS.has(event)) throw new Error(`unknown log event: ${String(event).slice(0, 40)}`);
   const inStep = als.getStore()?.span;
-  const ctx = inStep ? trace.setSpan(context.active(), inStep) : parentContext(ref);
+  const at = span || inStep;
+  const ctx = at ? trace.setSpan(context.active(), at) : parentContext(ref);
   logger.emit({
     eventName: event, body: event, severityText: severity, severityNumber: SEVERITY[severity] || 9, context: ctx,
     attributes: { ...(ref?.encounterId ? { 'roloe.encounter_id': ref.encounterId } : {}), ...clean(attrs) },

@@ -25,7 +25,8 @@ What each sponsor tool does in Roloe, with links and numbers. Only what has actu
 - Every request is a span; every meeting is one trace (`roloe.tap`, `roloe.overlap`, `roloe.guest_read`, `roloe.pull`, `roloe.findings`, `roloe.finding.check`, `roloe.try`, `roloe.probe`, `roloe.stop`). Attributes are IDs, counts and per-meeting HMACs, never text.
 - Metrics: `roloe.meetings`, `roloe.findings`, `roloe.help`, `roloe.time_to_help` (seconds; 120 s bucket for the SLO), `roloe.time_to_findings`. `scripts/otlp-check.mjs`: Dash0 accepted both a trace and a metric batch.
 - Found with traces: the guest page's "Opening…" took 3–14 s; the `roloe.tap` span showed copying 305 passages (with ELSER inference) took 3.2–4.4 s. Fix: the guest page now answers at once and the meeting is prepared behind it (2–16 ms).
-- Open: logs, browser RUM, the SLO and dashboard set up in Dash0, an Agent0 diagnosis.
+- Logs: meeting events (`meeting.started`, `meeting.instant_shown`, `meeting.findings_posted`, `meeting.nothing_strong`, `meeting.stopped`, `meeting.failed`, `guest.input_read`/`guest.input_failed`, `guest_try.state`, `http.server_error`) are OpenTelemetry log records carrying the trace and span they happened in, so a Dash0 log line opens its meeting's trace. Bodies come from that fixed list only; a test runs a real guest meeting and checks its logs share one trace and hold none of the guest's words. `scripts/otlp-check.mjs`: Dash0 accepted a log record with its trace ID on 9 November.
+- Open: the SLO and dashboard set up in Dash0, an Agent0 diagnosis.
 
 ## Radar / Argo CD
 

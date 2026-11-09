@@ -31,3 +31,18 @@ const mexp = new OTLPMetricExporter({ url: `${base.replace(/\/v1\/traces$/, '')}
 const mres = await new Promise((r) => mexp.export(resourceMetrics, r));
 console.log(mres.code === 0 ? 'Metrics accepted by the OTLP endpoint.' : `Metrics rejected: ${mres.error?.message || mres.code}`);
 await mexp.shutdown();
+
+// Logs too: one record inside a span, sent to /v1/logs, carrying that span's trace ID.
+const { LoggerProvider, SimpleLogRecordProcessor } = await import('@opentelemetry/sdk-logs');
+const { OTLPLogExporter } = await import('@opentelemetry/exporter-logs-otlp-http');
+const { trace, context } = await import('@opentelemetry/api');
+const lexp = new OTLPLogExporter({ url: `${base.replace(/\/v1\/traces$/, '')}/v1/logs`, headers });
+const lres = await new Promise((resolve) => {
+  const capture = { export: (recs, cb) => lexp.export(recs, (r) => { resolve({ ...r, traceId: recs[0]?.spanContext?.traceId }); cb(r); }), shutdown: () => lexp.shutdown(), forceFlush: () => Promise.resolve() };
+  const lp = new LoggerProvider({ resource: resourceFromAttributes({ 'service.name': 'roloe-otlp-check' }), processors: [new SimpleLogRecordProcessor({ exporter: capture })] });
+  const span = new TracerProvider().getTracer('check').startSpan('roloe.otlp_check_log');
+  lp.getLogger('check').emit({ body: 'meeting.started', severityText: 'INFO', severityNumber: 9, context: trace.setSpan(context.active(), span), attributes: { 'roloe.check': true } });
+  span.end();
+});
+console.log(lres.code === 0 ? `Logs accepted by the OTLP endpoint (trace ${lres.traceId}).` : `Logs rejected: ${lres.error?.message || lres.code}`);
+await lexp.shutdown();
