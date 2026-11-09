@@ -9,3 +9,9 @@ test('flags secret-shaped literals with file and line; runtime-assembled fakes p
   assert.deepEqual(scanText('y.mjs', "const t = 'ghp_' + 'A'.repeat(36);\n"), []);
   assert.deepEqual(scanText('README.md', 'Set `ELASTIC_API_KEY=` in .env\n'), []);
 });
+
+test('KEY=value secrets are caught too, but references and empty slots are not (Gitar)', () => {
+  assert.equal(scanText('.env.example', 'ELASTIC_API_KEY=Xk29fj3kLq8zQ\n')[0]?.kind, 'secret value');
+  assert.deepEqual(scanText('.env.example', 'ELASTIC_API_KEY=\nDASH0_AUTH_TOKEN=\n'), []);
+  assert.deepEqual(scanText('src/x.mjs', 'const k = process.env.ELASTIC_API_KEY;\n'), []);
+});
