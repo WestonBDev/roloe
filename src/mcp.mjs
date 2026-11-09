@@ -18,6 +18,15 @@ const plain = (s) => String(s || '').replace(/[^\p{L}\p{N} .'-]/gu, '').slice(0,
 const text = (obj) => ({ content: [{ type: 'text', text: JSON.stringify(obj, null, 1) }] });
 const fail = (msg) => ({ content: [{ type: 'text', text: msg }], isError: true });
 
+// Which meeting to answer next: unanswered, from the last 10 minutes, oldest first. A guest who
+// scanned an hour ago and left must not be served before the person standing there now.
+const FRESH_MS = 10 * 60e3;
+export function nextMeeting(list, now = Date.now()) {
+  return list
+    .filter((e) => !e.posted && (e.status ?? 'open') === 'open' && now - Date.parse(e.created) < FRESH_MS)
+    .sort((a, b) => Date.parse(a.created) - Date.parse(b.created))[0];
+}
+
 export async function runMcp() {
   const cfg = loadConfig();
   const seen = new Set();          // encounters already surfaced to this session
@@ -27,7 +36,7 @@ export async function runMcp() {
   );
 
   const inbox = async () => (await api(cfg, 'GET', '/api/me/encounters')).encounters;
-  const latestOpen = async () => (await inbox()).find((e) => !e.posted);
+  const latestOpen = async () => nextMeeting(await inbox());
   const pull = async (id) => api(cfg, 'GET', `/api/e/${id}/pull`);
 
   server.registerTool('roloe_wait_for_tap', {
@@ -35,10 +44,8 @@ export async function runMcp() {
     inputSchema: { timeout_s: z.number().min(1).max(110).optional() },
   }, async ({ timeout_s = 50 }) => {
     const until = Date.now() + timeout_s * 1000;
-    const start = new Set((await inbox()).map((e) => e.id));
     for (;;) {
-      const list = await inbox();
-      const fresh = list.find((e) => !e.posted && (!start.has(e.id) || !seen.has(e.id)));
+      const fresh = nextMeeting(await inbox());
       if (fresh) { seen.add(fresh.id); return text(await pull(fresh.id)); }
       if (Date.now() > until) return text({ tap: null, message: 'No tap yet. Call roloe_wait_for_tap again to keep waiting.' });
       await new Promise((r) => setTimeout(r, 700));
