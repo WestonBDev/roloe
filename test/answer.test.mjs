@@ -32,3 +32,15 @@ test('each run is told its one meeting, gets only the four Roloe tools, and its 
 test('a meeting id that is not one is never put in a prompt', () => {
   assert.throws(() => answerCommand('e-1; rm -rf ~', { bin: 'b', home: 'h' }), /bad meeting id/);
 });
+
+test('a run that ended without posting is retried once after 30 s, then left alone (Gitar)', () => {
+  const list = [M('e-0000000001', 1)];
+  const attempts = new Map();
+  assert.deepEqual(meetingsToAnswer(list, now, new Set(), attempts), ['e-0000000001']);
+  attempts.set('e-0000000001', { n: 1, last: now - 5_000 });
+  assert.deepEqual(meetingsToAnswer(list, now, new Set(), attempts), [], 'not again within 30 s');
+  attempts.set('e-0000000001', { n: 1, last: now - 31_000 });
+  assert.deepEqual(meetingsToAnswer(list, now, new Set(), attempts), ['e-0000000001'], 'one retry');
+  attempts.set('e-0000000001', { n: 2, last: now - 300_000 });
+  assert.deepEqual(meetingsToAnswer(list, now, new Set(), attempts), [], 'two tries is the cap');
+});
