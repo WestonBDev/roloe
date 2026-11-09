@@ -5,7 +5,7 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { PATTERNS } from '../src/scrub.mjs';
 
-const ENV_SECRET = /\b([A-Z][A-Z0-9_]*(?:KEY|TOKEN|SECRET|PASSWORD|PASSWD)[A-Z0-9_]*)\s*[:=]\s*["']?([A-Za-z0-9_+/=.-]{10,})/g;
+const ENV_SECRET = /(?<![A-Za-z0-9_])([A-Za-z0-9_]*(?:KEY|TOKEN|SECRET|PASSWORD|PASSWD|PWD|CREDENTIAL)[A-Za-z0-9_]*)\s*[:=]\s*["']?([A-Za-z0-9_+/=.-]{10,})(?![A-Za-z0-9_(])/gi;
 const SKIP_KINDS = new Set(['email', 'long hex', 'url credentials']);   // too common in docs and lockfiles to mean a secret
 
 export function scanText(file, text) {
@@ -20,7 +20,7 @@ export function scanText(file, text) {
     }
     // Env-style NAME_KEY=value with a real-looking value (letters and digits, 10+). Code such as
     // `const key = bearer(req)`, references and empty slots pass.
-    if (!hit) for (const m of line.matchAll(ENV_SECRET)) if (/\d/.test(m[2]) && /[A-Za-z]/.test(m[2])) { found.push({ file, line: i + 1, kind: 'secret value' }); break; }
+    if (!hit) for (const m of line.matchAll(ENV_SECRET)) if (/\d/.test(m[2]) && /[A-Za-z]/.test(m[2]) && !/^(process\.env|env\.|import\.meta|os\.environ|config\.)/i.test(m[2])) { found.push({ file, line: i + 1, kind: 'secret value' }); break; }
   });
   return found;
 }

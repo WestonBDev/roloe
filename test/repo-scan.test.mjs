@@ -19,5 +19,5 @@ test('KEY=value secrets are caught too, but references and empty slots are not (
 test('bare SECRET=/TOKEN= and PWD/CREDENTIAL names are caught; code that reads a key is not (Gitar)', () => {
   const v = 'Xk29fj' + '3kLq8zQ';
   for (const name of ['SECRET', 'TOKEN', 'DB_PWD', 'AWS_CREDENTIAL', 'api_key']) assert.equal(scanText('.env', `${name}=${v}\n`)[0]?.kind, 'secret value', name);
-  for (const line of ['const key = bearer(req);', 'const key = newKey(\'rk\');', "send(res, 201, { key: enc.sides[guest.owner].key });"]) assert.deepEqual(scanText('src/x.mjs', line), [], line);
+  for (const line of ['  dash0Token: process.env.DASH0_AUTH_TOKEN || \'\',', 'const key = bearer(req);', 'const key = newKey(\'rk\');', "send(res, 201, { key: enc.sides[guest.owner].key });"]) assert.deepEqual(scanText('src/x.mjs', line), [], line);
 });
