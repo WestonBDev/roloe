@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { config } from './env.mjs';
 import { router, send, readJson, bearer, HttpError } from './http.mjs';
 import { state, load, save, saveNow, sha256, newKey, sameHash, cleanOwnerId, cleanName, cleanLine } from './state.mjs';
-import { otlpOn, traceFile, flush } from './telemetry.mjs';
+import { otlpOn, traceFile, logFile, flush } from './telemetry.mjs';
 import { record, flushMetrics } from './metrics.mjs';
 import { syncMeeting } from './meeting-record.mjs';
 const traceFileRef = traceFile;
@@ -15,7 +15,7 @@ import { createEncounter, inboxEntry, stageLink, sideLink, newSide } from './enc
 import { readGuestInput, parseGuestLink } from './guest-input.mjs';
 import { forwardRum, rateLimiter } from './rum-proxy.mjs';
 import { checkFinding } from './checks.mjs';
-import { step, hmac, destroyHmacKey, endEncounterTrace, startEncounterTrace } from './telemetry.mjs';
+import { step, hmac, destroyHmacKey, endEncounterTrace, startEncounterTrace, logEvent } from './telemetry.mjs';
 import { secretShaped } from './scrub.mjs';
 import { gate } from './gate.mjs';
 import { readFileSync, existsSync, openSync, readSync, closeSync, statSync } from 'node:fs';
@@ -429,6 +429,7 @@ export function buildApp({ store, guestReader = readGuestInput, guestReadTimeout
       record.findings('accepted', accepted);
       record.findings('dropped', dropped.length);
       if (accepted === 0) record.findings('nothing_strong', 1);
+      logEvent(accepted ? 'meeting.findings_posted' : 'meeting.nothing_strong', { ref: ref(enc), attrs: { 'roloe.findings.accepted': accepted, 'roloe.findings.dropped': dropped.length } });
       if (!enc.times.first_findings) { enc.times.first_findings = now; record.timeToFindings(now - enc.times.tap); }
       const posters = [enc.a, enc.b].filter((w) => !w.startsWith('guest-'));
       if (posters.every((w) => enc.sides[w].posted)) enc.times.all_findings = now;
@@ -519,6 +520,7 @@ export function buildApp({ store, guestReader = readGuestInput, guestReadTimeout
       // and copies nothing (or removes what it just made).
       enc.status = 'closed';
       enc.closed = { at: new Date().toISOString(), by: me, deleted: 0, query_after_stop: 0, before_open: true };
+      logEvent('meeting.stopped', { ref: ref(enc), attrs: { 'roloe.closed_before_open': true } });
       endEncounterTrace(enc.id, { 'roloe.closed': true, 'roloe.closed_before_open': true });
       destroyHmacKey(enc.id);
       syncMeeting(store, enc);
@@ -541,6 +543,7 @@ export function buildApp({ store, guestReader = readGuestInput, guestReadTimeout
         enc.status = 'closed';
         delete enc.instant;   // the passage it quoted was just deleted too
         enc.closed = { at: new Date().toISOString(), by: me, ...result };
+        logEvent('meeting.stopped', { ref: ref(enc), attrs: { 'roloe.stop.deleted': result.deleted, 'roloe.stop.query_after_stop': String(result.query_after_stop) } });
         endEncounterTrace(enc.id, { 'roloe.closed': true });
         destroyHmacKey(enc.id);
         syncMeeting(store, enc);
@@ -605,6 +608,7 @@ export function buildApp({ store, guestReader = readGuestInput, guestReadTimeout
           const r = await Promise.race([guestReader({ link, text: b.text }), late]).finally(() => clearTimeout(timer));
           if (r.late && b.text) Object.assign(r, await readGuestInput({ text: b.text }), { error: r.error });   // a sentence needs no fetching
           sp.setAttributes({ 'roloe.guest.kind': r.kind, 'roloe.guest.passages': r.passages.length, 'roloe.guest.read_ok': !r.error });
+          logEvent(r.error ? 'guest.input_failed' : 'guest.input_read', { ref: { encounterId: preset.id, ...preset.trace }, severity: r.error ? 'WARN' : 'INFO', attrs: { 'roloe.guest.kind': r.kind, 'roloe.guest.passages': r.passages.length, 'roloe.guest.late': Boolean(r.late) } });
           return r;
         });
         if (enc.status !== 'preparing') return;   // stopped while their link was being read (its trace already closed)
@@ -624,6 +628,7 @@ export function buildApp({ store, guestReader = readGuestInput, guestReadTimeout
           save();
         }
       } catch (e) {
+        logEvent('meeting.failed', { ref: { encounterId: enc.id, ...preset.trace }, severity: 'ERROR', attrs: { 'error.type': e.code || e.name || 'error' } });
         endEncounterTrace(enc.id, { 'roloe.failed': true, 'error.type': e.code || e.name || 'error' });
         enc.status = 'failed';
         enc.guest.error = 'This meeting could not be opened. Scan the card again to retry.';
@@ -707,6 +712,7 @@ export function buildApp({ store, guestReader = readGuestInput, guestReadTimeout
     if (!GUEST_TRY_FROM[b.state]?.includes(f.try.state)) throw new HttpError(409, 'bad_transition', `Can't go from ${f.try.state} to ${b.state}`);
     const num = (v) => (Number.isFinite(+v) && v !== null && v !== undefined ? Math.max(0, Math.round(+v)) : null);
     f.try = { ...f.try, state: b.state, at: Date.now() };
+    logEvent('guest_try.state', { ref: ref(enc), attrs: { 'roloe.try.state': b.state } });
     if (['review', 'no-tests', 'did-not-apply'].includes(b.state)) {
       f.try.diff = String(b.diff || '').slice(0, 80_000);
       f.try.test_command = cleanLine(b.test_command || '', 80) || null;
@@ -754,30 +760,34 @@ export function buildApp({ store, guestReader = readGuestInput, guestReadTimeout
   return r;
 }
 
-// Canary scan of exported telemetry, incremental: only bytes added since the last scan are read.
-// A newly registered canary restarts the scan from the beginning.
-const scanState = { offset: 0, hits: 0, tail: '', canaries: '' };
+// Canary scan of exported telemetry (spans and logs), incremental: only bytes added to each file
+// since the last scan are read. A newly registered canary restarts the scan from the beginning.
+const scanState = { canaries: '', files: new Map() };   // file -> { offset, hits, tail }
+function scanFile(file) {
+  const st = scanState.files.get(file) || { offset: 0, hits: 0, tail: '' };
+  scanState.files.set(file, st);
+  if (!existsSync(file)) return 0;
+  const size = statSync(file).size;
+  if (size < st.offset) Object.assign(st, { offset: 0, hits: 0, tail: '' });
+  if (size <= st.offset) return 0;
+  const fd = openSync(file, 'r');
+  try {
+    const buf = Buffer.alloc(size - st.offset);
+    const read = readSync(fd, buf, 0, buf.length, st.offset);
+    const text = st.tail + buf.toString('utf8', 0, read);
+    for (const c of state.canaries) st.hits += text.split(c).length - 1 - (st.tail.split(c).length - 1);
+    st.tail = text.slice(-(Math.max(...state.canaries.map((c) => c.length)) - 1));
+    st.offset += read;
+    return read;
+  } finally { closeSync(fd); }
+}
 function scanTelemetry() {
   const key = state.canaries.join('\n');
-  if (key !== scanState.canaries) Object.assign(scanState, { offset: 0, hits: 0, tail: '', canaries: key });
+  if (key !== scanState.canaries) Object.assign(scanState, { canaries: key, files: new Map() });
   let read = 0;
-  if (state.canaries.length && existsSync(traceFileRef)) {
-    const size = statSync(traceFileRef).size;
-    if (size < scanState.offset) Object.assign(scanState, { offset: 0, hits: 0, tail: '' });
-    if (size > scanState.offset) {
-      const fd = openSync(traceFileRef, 'r');
-      try {
-        const buf = Buffer.alloc(size - scanState.offset);
-        read = readSync(fd, buf, 0, buf.length, scanState.offset);
-        const text = scanState.tail + buf.toString('utf8', 0, read);
-        for (const c of state.canaries) scanState.hits += text.split(c).length - 1 - (scanState.tail.split(c).length - 1);
-        const keep = Math.max(...state.canaries.map((c) => c.length)) - 1;
-        scanState.tail = text.slice(-keep);
-        scanState.offset += read;
-      } finally { closeSync(fd); }
-    }
-  }
-  return { hits: scanState.hits, read, offset: scanState.offset };
+  if (state.canaries.length) for (const f of [traceFileRef, logFile]) read += scanFile(f);
+  const all = [...scanState.files.values()];
+  return { hits: all.reduce((n, x) => n + x.hits, 0), read, offset: all.reduce((n, x) => n + x.offset, 0) };
 }
 
 const median = (xs) => { const v = xs.filter((x) => Number.isFinite(x)).sort((a, b) => a - b); if (!v.length) return null; const m = Math.floor(v.length / 2); return v.length % 2 ? v[m] : (v[m - 1] + v[m]) / 2; };

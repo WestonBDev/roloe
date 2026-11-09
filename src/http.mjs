@@ -1,6 +1,6 @@
 // Tiny router on plain node:http. Every request gets a span named by its route template.
 import { SpanStatusCode } from '@opentelemetry/api';
-import { requestSpan } from './telemetry.mjs';
+import { requestSpan, logEvent } from './telemetry.mjs';
 
 export class HttpError extends Error {
   constructor(status, code, message) { super(message || code); this.status = status; this.code = code; }
@@ -27,6 +27,7 @@ export function router() {
       if (status >= 500) {
         span.setStatus({ code: SpanStatusCode.ERROR, message: e.code || e.name || 'error' });
         console.error('[roloe]', req.method, route?.path, e.code || e.name, status === 500 ? e.message : '');
+        logEvent('http.server_error', { span, severity: 'ERROR', attrs: { 'http.route': route?.path || 'unmatched', 'error.type': e.code || e.name || 'error' } });
       }
       if (!res.headersSent) send(res, status, { error: e.code || 'error', message: status >= 500 ? 'Something went wrong on the coordinator.' : e.message });
     } finally {
