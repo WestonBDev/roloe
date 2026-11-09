@@ -2,22 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { startTestServer } from './helpers.mjs';
-
-const P = (id, text, kind = 'session') => ({ passage_id: id, kind, speaker: kind === 'file' ? '' : 'owner', source: 's', locator: id, ts: new Date().toISOString(), text });
-
-export async function twoCards(s) {
-  const reg = async (owner, name, passages) => {
-    const { body: { key } } = await s.call('POST', '/api/owners', { owner, name });
-    const auth = { authorization: `Bearer ${key}` };
-    await s.call('POST', `/api/cards/${owner}/switch`, { on: true }, auth);
-    await s.call('PUT', `/api/cards/${owner}`, { passages }, auth);
-    return auth;
-  };
-  const wes = await reg('wes', 'Wes', [P('p-e00001', 'card watcher records refresh as done before the push succeeds'), P('p-e00002', 'function refresh() { push(card); markDone(); }', 'file')]);
-  const aiden = await reg('aiden', 'Aiden', [P('p-a00001', 'mark the combined total partial when one fetch fails to load, then retry the push'), P('p-a00002', 'pick a theme')]);
-  return { wes, aiden };
-}
+import { startTestServer, twoCards } from './helpers.mjs';
 
 test('a tap copies both cards into the encounter, precomputes overlap both ways, and is traced', async () => {
   const s = await startTestServer();

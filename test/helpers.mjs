@@ -15,6 +15,7 @@ export async function startTestServer() {
   const { state } = await import('../src/state.mjs');
   for (const k of Object.keys(state.owners)) delete state.owners[k];
   for (const k of Object.keys(state.encounters)) delete state.encounters[k];
+  state.canaries.length = 0;
   const { memoryStore } = await import('../src/store/memory.mjs');
   const store = memoryStore();
   await store.init();
@@ -30,3 +31,20 @@ export async function startTestServer() {
   };
   return { base, call, close: () => new Promise((r) => server.close(r)), dataDir: process.env.ROLOE_DATA_DIR, store, state: () => state };
 }
+
+// Two registered, sharing cards with a known overlap (Aiden's retry lesson, Wes's watcher bug).
+const P = (id, text, kind = 'session') => ({ passage_id: id, kind, speaker: kind === 'file' ? '' : 'owner', source: 's', locator: id, ts: new Date().toISOString(), text });
+
+export async function twoCards(s) {
+  const reg = async (owner, name, passages) => {
+    const { body: { key } } = await s.call('POST', '/api/owners', { owner, name });
+    const auth = { authorization: `Bearer ${key}` };
+    await s.call('POST', `/api/cards/${owner}/switch`, { on: true }, auth);
+    await s.call('PUT', `/api/cards/${owner}`, { passages }, auth);
+    return auth;
+  };
+  const wes = await reg('wes', 'Wes', [P('p-e00001', 'card watcher records refresh as done before the push succeeds'), P('p-e00002', 'function refresh() { push(card); markDone(); }', 'file')]);
+  const aiden = await reg('aiden', 'Aiden', [P('p-a00001', 'mark the combined total partial when one fetch fails to load, then retry the push'), P('p-a00002', 'pick a theme')]);
+  return { wes, aiden };
+}
+
