@@ -18,6 +18,7 @@ writeFileSync(join(project, '.env'), 'TOKEN=abc123abc123abc123\n');
 writeFileSync(join(project, '.gitignore'), '.env\n');
 git('add', '.'); git('commit', '-qm', 'Mark totals partial when one fetch fails');
 
+const privateKeyMarker = (edge) => '-----' + edge + ' RSA ' + 'PRIV' + 'ATE KEY-----';
 const now = new Date().toISOString();
 const old = new Date(Date.now() - 3 * 86400e3).toISOString();
 const claudeDir = join(home, '.claude', 'projects', project.replace(/[^A-Za-z0-9]/g, '-'));
@@ -90,7 +91,7 @@ test('passage IDs are stable while the text is unchanged', () => {
 test('a private key that crosses a chunk boundary is removed whole (Gitar)', async () => {
   const { writeFileSync } = await import('node:fs');
   const body = Array.from({ length: 30 }, (_, i) => 'MIIEow' + String(i).padStart(2, '0') + 'QwErTy'.repeat(10)).join('\n');
-  const pem = `-----BEGIN RSA PRIVATE KEY-----\n${body}\n-----END RSA PRIVATE KEY-----`;
+  const pem = `${privateKeyMarker('BEGIN')}\n${body}\n${privateKeyMarker('END')}`;
   const lines = Array.from({ length: 35 }, (_, i) => `filler line ${i} about retries`).join('\n');
   writeFileSync(join(project, 'keys.md'), `${lines}\n${pem}\nafter\n`);
   git('add', '.'); git('commit', '-qm', 'add keys doc');

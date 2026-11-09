@@ -5,6 +5,7 @@ import { gate, usableSecret } from '../src/gate.mjs';
 
 // Test-only fake values, assembled at runtime so no secret-shaped literal sits in the repo.
 const fake = (prefix, n = 32) => prefix + 'Ab3'.repeat(Math.ceil(n / 3)).slice(0, n);
+const privateKeyMarker = (edge) => '-----' + edge + ' RSA ' + 'PRIV' + 'ATE KEY-----';
 
 test('scrubber removes each secret shape and keeps the value only in `removed`', () => {
   const cases = [
@@ -13,7 +14,7 @@ test('scrubber removes each secret shape and keeps the value only in `removed`',
     ['github token', fake('ghp_', 36)],
     ['aws key', 'AKIA' + 'ABCDEFGHIJ234567'],
     ['slack token', fake('xoxb-', 20)],
-    ['jwt', 'eyJhbGciOiJIUzI1.eyJzdWIiOiIxMjM0.SflKxwRJSMeKKF2QT4fw'],
+    ['jwt', ['eyJhbGciOiJIUzI1', 'eyJzdWIiOiIxMjM0', 'SflKxwRJSMeKKF2QT4fw'].join('.')],
     ['bearer token', 'Bearer ' + fake('', 24)],
     ['email', 'someone@example.com'],
     ['long hex', 'a1'.repeat(21)],
@@ -27,7 +28,7 @@ test('scrubber removes each secret shape and keeps the value only in `removed`',
 });
 
 test('scrubber removes private key blocks and assigned secret values', () => {
-  const pem = '-----BEGIN RSA PRIVATE KEY-----\nMIIEow' + 'x'.repeat(40) + '\n-----END RSA PRIVATE KEY-----';
+  const pem = privateKeyMarker('BEGIN') + '\nMIIEow' + 'x'.repeat(40) + '\n' + privateKeyMarker('END');
   assert.equal(scrub(pem).text.trim(), '[removed: private key]');
   const s = scrub('DB_PASSWORD=hunter2isNotGood9');
   assert.equal(s.text, 'DB_PASSWORD=[removed: secret value]');
@@ -69,7 +70,7 @@ test('gate ignores plain-word "secrets" so project vocabulary never blocks', () 
 });
 
 test('scrubbing keeps line numbers: a multi-line match leaves the same number of lines (Gitar)', () => {
-  const pem = '-----BEGIN RSA PRIVATE KEY-----\nMIIEow' + 'x'.repeat(40) + '\nabc\n-----END RSA PRIVATE KEY-----';
+  const pem = privateKeyMarker('BEGIN') + '\nMIIEow' + 'x'.repeat(40) + '\nabc\n' + privateKeyMarker('END');
   const text = `line one\n${pem}\nline after`;
   const out = scrub(text).text;
   assert.equal(out.split('\n').length, text.split('\n').length);
