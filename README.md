@@ -107,7 +107,7 @@ kubectl apply -n argocd -f deploy/argocd-application.yaml
 scripts/k8s-secrets.sh            # creates the roloe-elastic and roloe-otel Secrets from your .env; values never enter git
 ```
 
-`ROLOE_PUBLIC_URL` (where QR codes point) and the pinned commit (`ROLOE_REF`) live in `deploy/coordinator.yaml`; change them in git and Argo CD syncs. `scripts/pin-deploy.sh` pins the current `main`.
+`ROLOE_PUBLIC_URL` (where QR codes point) and the pinned commit (`ROLOE_REF`) live in the Deployment's pod template in `deploy/coordinator.yaml`; change them in git and Argo CD syncs and rolls the pod. `scripts/pin-deploy.sh` pins the current `main`.
 
 ### Tests
 

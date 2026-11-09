@@ -1,6 +1,6 @@
 # Roloe coordinator on Kubernetes. No image registry needed: the pod runs the stock node:22-slim
 # image, and an init container fetches this public repository at a pinned commit (bump it with
-# scripts/pin-deploy.sh; Argo CD syncs the change). One replica: encounter state lives in the
+# scripts/pin-deploy.sh, which edits the pod template so the pod rolls; Argo CD syncs it). One replica: encounter state lives in the
 # process and on the /data volume.
 apiVersion: v1
 kind: Namespace
@@ -14,9 +14,6 @@ metadata:
   namespace: roloe
 data:
   ROLOE_REPO: https://github.com/WestonBDev/roloe.git
-  ROLOE_REF: "7a26285ab0a68cccfe512fcfab6186235a484f77"
-  # The URL phones use (QR codes point here). Kept in git: Argo CD self-heal reverts manual edits.
-  ROLOE_PUBLIC_URL: https://roloe.cnh.radarhq.io
   ROLOE_ENVIRONMENT: radar-cluster
   OTEL_SERVICE_NAME: roloe-coordinator
 ---
@@ -65,6 +62,9 @@ spec:
               "
               tar -xzf /tmp/src.tgz --strip-components=1 -C /app
               HOME=/tmp npm ci --omit=dev --ignore-scripts --no-audit --no-fund
+          env:
+            # The pinned commit lives in the pod template, so bumping it (scripts/pin-deploy.sh) rolls the pod.
+            - { name: ROLOE_REF, value: "7a26285ab0a68cccfe512fcfab6186235a484f77" }
           envFrom:
             - configMapRef: { name: roloe-config }
           securityContext:
@@ -85,6 +85,8 @@ spec:
             - { name: PORT, value: "7420" }
             - { name: ROLOE_DATA_DIR, value: /data }
             - { name: ROLOE_ENV_FILE, value: /nonexistent }
+            # The URL phones use (QR codes point here). In git: Argo CD self-heal reverts manual edits.
+            - { name: ROLOE_PUBLIC_URL, value: "https://roloe.cnh.radarhq.io" }
           envFrom:
             - configMapRef: { name: roloe-config }
             # kubectl -n roloe create secret generic roloe-elastic --from-literal=ELASTIC_URL=... --from-literal=ELASTIC_API_KEY=...
