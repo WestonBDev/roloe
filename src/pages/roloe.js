@@ -61,6 +61,7 @@ export function findingCard(f, name, { index = 0, flip = true } = {}) {
       <p style="margin-top:6px">${esc(f.what)}</p>
       <p class="cite">cites ${esc(f.cites)} · ${esc(f.credit?.locator || '')}</p>
       ${edits.length && flip ? `<div class="row" style="margin-top:6px"><button class="ghost turn">Turn over: the change</button></div>` : ''}
+      ${edits.length && !flip ? `<p class="label" style="margin-top:6px">Suggested change for ${esc(edits[0].file)} · not tested</p>` : ''}
     </div>
     ${back}
   </article>`;

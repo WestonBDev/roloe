@@ -95,12 +95,15 @@ async function readGithub(g, opts) {
   const wanted = (path, size) => (!prefix || path === prefix || path.startsWith(prefix + '/')) && TEXT_EXT.test(path) && !SKIP.test(path) && size <= MAX_FILE_BYTES;
   const candidates = [];
   let candidateBytes = 0;
-  await untar(res.body, {
+  // With a folder, leave time to fall back to walking the tree if the tarball can't reach it.
+  const tarDeadline = prefix ? Math.min(opts.deadline, Date.now() + (opts.deadline - Date.now()) * 0.55) : opts.deadline;
+  const { cutOff } = await untar(res.body, {
     maxBytes: MAX_TARBALL_BYTES,
-    deadline: opts.deadline,
+    deadline: tarDeadline,
     onFile(path, size) { return wanted(path, size) && candidateBytes < 3_000_000 && candidates.length < 400; },
     file(path, buf) { candidates.push({ path, text: buf.toString('utf8') }); candidateBytes += buf.length; },
   });
+  if (prefix && !candidates.length && cutOff) candidates.push(...await walkFolder(g, prefix, opts, wanted));
   // READMEs first, then shallow paths, then the rest.
   candidates.sort((a, b) => (/readme/i.test(b.path) - /readme/i.test(a.path)) || (a.path.split('/').length - b.path.split('/').length) || a.path.localeCompare(b.path));
   const files = candidates.slice(0, MAX_FILES);
@@ -119,20 +122,52 @@ async function readGithub(g, opts) {
   return { passages: passages.slice(0, 120), files: files.length, removed, repo: `https://github.com/${g.owner}/${g.repo}`, ref: g.ref, path: g.path };
 }
 
+// Fallback for a folder deep inside a huge monorepo: walk the tree to it (a few API calls),
+// then fetch its files from raw.githubusercontent.com.
+async function walkFolder(g, prefix, opts, wanted) {
+  const trees = `https://api.github.com/repos/${g.owner}/${g.repo}/git/trees`;
+  const getTree = async (ref, recursive) => JSON.parse((await safeFetch(`${trees}/${encodeURIComponent(ref)}${recursive ? '?recursive=1' : ''}`, { ...opts, maxBytes: 8_000_000 })).text);
+  let sha = g.ref;
+  let entries = [];
+  const parts = prefix.split('/');
+  for (const [i, part] of parts.entries()) {
+    const hit = ((await getTree(sha, false)).tree || []).find((t) => t.path === part);
+    if (!hit) return [];
+    if (hit.type === 'blob') { entries = [{ path: prefix, type: 'blob', size: hit.size || 0 }]; break; }
+    sha = hit.sha;
+    if (i === parts.length - 1) entries = ((await getTree(sha, true)).tree || []).map((t) => ({ ...t, path: `${prefix}/${t.path}` }));
+  }
+  const files = entries.filter((t) => t.type === 'blob' && wanted(t.path, t.size || 0))
+    .sort((a, b) => (/readme/i.test(b.path) - /readme/i.test(a.path)) || (a.path.split('/').length - b.path.split('/').length)).slice(0, MAX_FILES);
+  // Fetch in parallel: a scan shouldn't wait on files one by one.
+  const got = await Promise.all(files.map(async (f) => {
+    const raw = `https://raw.githubusercontent.com/${g.owner}/${g.repo}/${encodeURIComponent(g.ref)}/${f.path.split('/').map(encodeURIComponent).join('/')}`;
+    try { return { path: f.path, text: (await safeFetch(raw, { ...opts, maxBytes: MAX_FILE_BYTES })).text }; } catch { return null; }
+  }));
+  return got.filter(Boolean);
+}
+
 // A minimal streaming tar reader (ustar + pax path headers) over a gzip stream.
 async function untar(webStream, { maxBytes, deadline, onFile, file }) {
   const { createGunzip } = await import('node:zlib');
   const { Readable } = await import('node:stream');
-  const gunzip = Readable.fromWeb(webStream).pipe(createGunzip());
+  const source = Readable.fromWeb(webStream);
+  const gunzip = source.pipe(createGunzip());
+  // A stalled or broken download must end cleanly at the deadline, never crash the coordinator.
+  source.on('error', () => {});
+  gunzip.on('error', () => {});
+  let cutOff = false;
+  const timer = setTimeout(() => { cutOff = true; source.destroy(); gunzip.destroy(); }, Math.max(0, deadline - Date.now()));
   let buf = Buffer.alloc(0);
   let seen = 0;
   let entry = null;     // the current entry: { path, size, toRead (size + padding), keep, pax, chunks }
   let paxPath = null;
   const octal = (b) => parseInt(b.toString('ascii').replace(/\0.*$/s, '').trim() || '0', 8);
   const strip = (p) => p.split('/').slice(1).join('/');   // drop the "<repo>-<sha>/" top folder
+  try {
   for await (const chunk of gunzip) {
     seen += chunk.length;
-    if (seen > maxBytes || Date.now() > deadline) { gunzip.destroy(); break; }
+    if (seen > maxBytes || Date.now() > deadline) { cutOff = true; source.destroy(); gunzip.destroy(); break; }
     buf = buf.length ? Buffer.concat([buf, chunk]) : chunk;
     for (;;) {
       if (entry) {
@@ -164,6 +199,8 @@ async function untar(webStream, { maxBytes, deadline, onFile, file }) {
       entry = { path, size, got: 0, toRead: size + ((512 - (size % 512)) % 512), keep, pax: type === 'x', chunks: [] };
     }
   }
+  } catch { cutOff = true; } finally { clearTimeout(timer); }
+  return { cutOff };
 }
 
 async function readPage(p, opts) {
@@ -174,8 +211,8 @@ async function readPage(p, opts) {
   return { passages: chunkLines(s.text, host, 'link', new Date().toISOString()).slice(0, 40), removed: s.removed.length };
 }
 
-export async function readGuestInput({ link, text } = {}, { fetchImpl = fetch, lookup = dnsLookup } = {}) {
-  const deadline = Date.now() + TIMEOUT_MS;
+export async function readGuestInput({ link, text } = {}, { fetchImpl = fetch, lookup = dnsLookup, timeoutMs = TIMEOUT_MS } = {}) {
+  const deadline = Date.now() + timeoutMs;
   const opts = { fetchImpl, lookup, deadline };
   const out = { kind: 'none', passages: [], error: null };
   const sentence = String(text || '').trim().slice(0, 600);
