@@ -137,3 +137,36 @@ test('a reader that never returns can\'t hang a guest\'s meeting: it opens witho
     srv.close();
   } finally { await s.close(); }
 });
+
+test('a guest sentence that matches nothing on the card is still sent to the assistant (not read as a skip)', async () => {
+  const s = await startTestServer();
+  try {
+    const { wes } = await twoCards(s);
+    const g = await s.call('POST', '/api/g/wes/start', { text: 'zebra quilting patterns for sailboats' });
+    await waitReady(s, g.body.id, g.body.key);
+    const pull = (await s.call('GET', `/api/e/${g.body.id}/pull`, null, wes)).body;
+    assert.equal(pull.theirs.length, 1);
+  } finally { await s.close(); }
+});
+
+test('Stop while a guest meeting is still opening really stops it: it never opens and nothing is kept', async () => {
+  const http = await import('node:http');
+  const { buildApp } = await import('../src/coordinator.mjs');
+  const s = await startTestServer();
+  try {
+    const { wes } = await twoCards(s);
+    const app = buildApp({ store: s.store, guestReader: async (inp) => { await new Promise((r) => setTimeout(r, 400)); return { kind: 'text', passages: [{ passage_id: 'p-b00001', kind: 'session', speaker: 'owner', source: 'n', locator: 'n', ts: new Date().toISOString(), text: inp.text }], error: null }; } });
+    const srv = http.createServer(app.handle);
+    await new Promise((r) => srv.listen(0, '127.0.0.1', r));
+    const base = `http://127.0.0.1:${srv.address().port}`;
+    const g = await (await fetch(`${base}/api/g/wes/start`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ text: 'card watcher push' }) })).json();
+    const stop = await fetch(`${base}/api/e/${g.id}/stop?k=${g.key}`, { method: 'POST' });
+    assert.equal(stop.status, 200);
+    await new Promise((r) => setTimeout(r, 900));
+    const v = await (await fetch(`${base}/api/e/${g.id}?k=${g.key}`)).json();
+    assert.equal(v.status, 'closed');
+    assert.equal((await s.call('GET', '/api/me/encounters', null, wes)).body.encounters.length, 0);
+    assert.equal(await s.store.deleteEncounter(g.id), 0, 'no copies were made');
+    srv.close();
+  } finally { await s.close(); }
+});

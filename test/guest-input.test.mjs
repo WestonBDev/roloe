@@ -117,3 +117,35 @@ test('a tarball that stalls never crashes anything, and a deep monorepo folder f
   assert.ok(Date.now() - t0 < 6000);
   assert.deepEqual(r.passages.map((p) => p.source), ['packages/api/index.js']);
 });
+
+test('the connection itself is pinned to a checked public address (no DNS rebinding)', async () => {
+  const { guardedLookup } = await import('../src/guest-input.mjs');
+  let calls = 0;
+  const flip = async () => (++calls === 1 ? [{ address: '140.82.112.3', family: 4 }] : [{ address: '127.0.0.1', family: 4 }]);
+  const lk = guardedLookup(flip);
+  const first = await new Promise((res) => lk('evil.example', { all: true }, (err, addrs) => res({ err, addrs })));
+  assert.equal(first.err, null);
+  const second = await new Promise((res) => lk('evil.example', { all: true }, (err, addrs) => res({ err, addrs })));
+  assert.match(String(second.err?.message), /public/, 'the address used to connect is checked, every time');
+});
+
+test('byte caps hold while downloading: an endless page is cut off, not buffered', async () => {
+  let sent = 0;
+  const endless = async () => new Response(new ReadableStream({ pull(c) { sent += 65536; c.enqueue(new TextEncoder().encode('<p>' + 'retry backoff '.repeat(4600) + '</p>')); } }), { status: 200, headers: { 'content-type': 'text/html' } });
+  const r = await readGuestInput({ link: 'https://endless.example/' }, { fetchImpl: endless, lookup: publicDns, timeoutMs: 3000 });
+  assert.ok(r.passages.length > 0);
+  assert.ok(sent < 2_000_000, `pulled ${sent} bytes`);
+});
+
+test('a slow tarball start still leaves time for the folder fallback', async () => {
+  const f = async (url, opts = {}) => {
+    const u = String(url);
+    if (/codeload/.test(u)) return new Promise((_, rej) => opts.signal?.addEventListener('abort', () => rej(new DOMException('aborted', 'AbortError'))));
+    if (/git\/trees\/main$/.test(u)) return new Response(JSON.stringify({ tree: [{ path: 'pkg', type: 'tree', sha: 'p1' }] }), { status: 200 });
+    if (/git\/trees\/p1\?recursive=1$/.test(u)) return new Response(JSON.stringify({ tree: [{ path: 'a.js', type: 'blob', size: 30 }] }), { status: 200 });
+    if (/raw\.githubusercontent\.com\/acme\/slow\/main\/pkg\/a\.js$/.test(u)) return new Response('export const retry = () => 1;\n', { status: 200 });
+    return new Response('no', { status: 404 });
+  };
+  const r = await readGuestInput({ link: 'https://github.com/acme/slow/tree/main/pkg' }, { fetchImpl: f, lookup: publicDns, timeoutMs: 3000 });
+  assert.deepEqual(r.passages.map((p) => p.source), ['pkg/a.js']);
+});
