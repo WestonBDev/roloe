@@ -2,7 +2,7 @@
 // the server, and meeting keys never leave the phone, even if a page forgets to scrub a URL.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { forwardRum } from '../src/rum-proxy.mjs';
+import { forwardRum, rateLimiter } from '../src/rum-proxy.mjs';
 
 test('the RUM proxy strips meeting keys and card keys, caps size, and forwards with the server token', async () => {
   const sent = [];
@@ -18,4 +18,15 @@ test('the RUM proxy strips meeting keys and card keys, caps size, and forwards w
   assert.equal((await forwardRum('profiles', '{}', 'application/json', { endpoint: 'https://i', headers: {}, fetchImpl })).status, 404);
   assert.equal((await forwardRum('traces', '{}', 'application/json', { endpoint: '', headers: {}, fetchImpl })).status, 204, 'off without an OTLP endpoint');
   assert.equal((await forwardRum('traces', 'AAAA', 'application/x-protobuf', { endpoint: 'https://i', headers: {}, fetchImpl })).status, 415, 'only JSON, which can be scrubbed');
+});
+
+test('the RUM rate limit keeps only accepted hits and evicts the oldest address, never everyone (Gitar)', () => {
+  const allow = rateLimiter({ limit: 3, windowMs: 60_000, maxAddresses: 2 });
+  for (let i = 0; i < 3; i++) assert.equal(allow('a', 1000 + i), true);
+  for (let i = 0; i < 500; i++) assert.equal(allow('a', 2000 + i), false);   // a flood is refused...
+  assert.equal(allow('a', 61_003), true, '...and not recorded, so the window frees up on time');
+  allow('b', 61_004); allow('c', 61_005);   // a third address evicts only the oldest
+  assert.equal(allow('b', 61_006), true);
+  assert.equal(allow('b', 61_007), true);
+  assert.equal(allow('b', 61_008), false, 'b kept its count: the map was not cleared');
 });
