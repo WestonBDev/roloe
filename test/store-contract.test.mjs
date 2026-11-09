@@ -62,6 +62,7 @@ for (const [name, make] of targets) {
 
       // Two owners may carry the same passage_id; neither overwrites the other (Gitar).
       const e3 = `e-${u}000003`;
+      await store.replaceCard(a, 'Ann', [P('p-a00001', 'retry the upload when the push fails and mark the total partial'), P('p-a00002', 'pinned the embedding model after the upgrade broke search scores')]);
       await store.replaceCard(c, 'Cat', [P('p-a00001', 'cat has the same id as ann')]);
       assert.equal(await store.copyCardsToEncounter(e3, [a, c]), 3);
       const k3 = await store.createEncounterKey(e3);
