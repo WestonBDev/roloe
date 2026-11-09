@@ -29,8 +29,13 @@ export async function checkFinding(f, { get, giver, recipient, canaries = [] }) 
   const result = (reason, extra = {}) => ({ accepted: !reason, reason: reason || null, checks: extra });
   const checks = { citation: 'fail', quote: 'skip', about: 'skip', gate: 'skip' };
   if (!f || typeof f !== 'object') return result('not a finding', checks);
-  const cited = /^p-[0-9a-f]{6}$/.test(String(f.cites)) ? await get(String(f.cites)) : null;
-  if (!cited) return result('citation does not resolve', checks);
+  const ok = /^p-[0-9a-f]{6}$/.test(String(f.cites));
+  const cited = ok ? await get(String(f.cites), giver) : null;
+  if (!cited) {
+    // Distinguish "someone else's passage" from "nothing at all", for the drop reason.
+    const anyone = ok ? await get(String(f.cites)) : null;
+    return result(anyone ? 'citation is not the giver\'s' : 'citation does not resolve', checks);
+  }
   if (cited.owner_id !== giver) return result('citation is not the giver\'s', checks);
   checks.citation = 'pass';
 
@@ -43,7 +48,7 @@ export async function checkFinding(f, { get, giver, recipient, canaries = [] }) 
 
   let about = null;
   if (f.about) {
-    about = /^p-[0-9a-f]{6}$/.test(String(f.about)) ? await get(String(f.about)) : null;
+    about = /^p-[0-9a-f]{6}$/.test(String(f.about)) ? await get(String(f.about), recipient) : null;
     checks.about = 'fail';
     if (!about || about.owner_id !== recipient) return result('about is not the recipient\'s', checks);
     checks.about = 'pass';

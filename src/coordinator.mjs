@@ -282,16 +282,23 @@ export function buildApp({ store }) {
     const me = encOwner(req, enc);
     if (enc.status !== 'open') throw new HttpError(410, 'stopped', 'This meeting was stopped');
     const side = enc.sides[me];
-    if (side.posted) throw new HttpError(409, 'already_posted', 'One post per side');
-    const body = await readJson(req);
+    if (side.posted || side.posting) throw new HttpError(409, 'already_posted', 'One post per side');
+    side.posting = true;   // claimed before any await, so a concurrent post can't slip in
+    let body;
+    try { body = await readJson(req); } catch (e) { side.posting = false; throw e; }
     const them = other(enc, me);
     const submitted = body.nothing_strong ? [] : (Array.isArray(body.findings) ? body.findings : []).slice(0, 10);
     const verdicts = await step('roloe.findings', ref(enc), { 'roloe.giver': hmac(enc.id, me) }, async (span) => {
+      try { return await postFindings(span); } catch (e) { side.posting = false; throw e; }
+    });
+    send(res, 200, { accepted: verdicts.filter((v) => v.accepted).length, verdicts });
+
+    async function postFindings(span) {
       const out = [];
       let accepted = 0;
       for (const [i, f] of submitted.entries()) {
         const v = await step('roloe.finding.check', ref(enc), { 'roloe.finding.index': i }, async (cs) => {
-          const r = await checkFinding(f, { get: (pid) => store.get(enc.keyId, pid), giver: me, recipient: them, canaries: state.canaries });
+          const r = await checkFinding(f, { get: (pid, owner) => store.get(enc.keyId, pid, owner), giver: me, recipient: them, canaries: state.canaries });
           if (r.accepted && accepted >= 3) { r.accepted = false; r.reason = 'more than 3'; }
           cs.setAttributes({ 'roloe.check.citation': r.checks.citation, 'roloe.check.quote': r.checks.quote, 'roloe.check.about': r.checks.about, 'roloe.check.gate': r.checks.gate, 'roloe.check.accepted': r.accepted, 'roloe.check.reason': r.reason || 'ok', 'roloe.cites_hmac': f?.cites ? hmac(enc.id, String(f.cites)) : '' });
           return r;
@@ -305,6 +312,7 @@ export function buildApp({ store }) {
         out.push({ index: i, accepted: v.accepted, reason: v.reason });
       }
       side.posted = true;
+      side.posting = false;
       side.posted_at = Date.now();
       side.nothing_strong = accepted === 0;
       const now = Date.now();
@@ -314,8 +322,7 @@ export function buildApp({ store }) {
       span.setAttributes({ 'roloe.findings.submitted': submitted.length, 'roloe.findings.accepted': accepted, 'roloe.findings.dropped': submitted.length - accepted, 'roloe.findings.nothing_strong': accepted === 0, 'roloe.ms_since_tap': now - enc.times.tap });
       save();
       return out;
-    });
-    send(res, 200, { accepted: verdicts.filter((v) => v.accepted).length, verdicts });
+    }
   });
 
   // Findings for the caller (assistant or Try it), with changes.
