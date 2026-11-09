@@ -71,3 +71,23 @@ test('cannot tap a card whose switch is off', async () => {
     assert.equal((await s.call('POST', '/api/tap', { to: 'wes' }, aiden)).status, 409);
   } finally { await s.close(); }
 });
+
+test('a tap that fails midway leaves no open encounter, no copies and no live key (Gitar)', async () => {
+  const s = await startTestServer();
+  try {
+    const { aiden, wes } = await twoCards(s);
+    const orig = s.store.createEncounterKey;
+    s.store.createEncounterKey = async () => { throw Object.assign(new Error('boom'), { code: 'es_down' }); };
+    const tap = await s.call('POST', '/api/tap', { to: 'wes' }, aiden);
+    s.store.createEncounterKey = orig;
+    assert.equal(tap.status, 500);
+    assert.deepEqual(Object.keys(s.state().encounters), []);
+    assert.equal((await s.call('GET', '/api/me/encounters', null, wes)).body.encounters.length, 0);
+    assert.equal(await s.store.copyCardsToEncounter('e-probe', []), 0);
+    const leftovers = (await s.store.listCard('aiden')).length + (await s.store.listCard('wes')).length;
+    assert.equal(leftovers, 4, 'cards untouched');
+    // no encounter copies remain: a fresh tap's key sees exactly its own 4
+    const ok = await s.call('POST', '/api/tap', { to: 'wes' }, aiden);
+    assert.equal(await s.store.count(s.state().encounters[ok.body.id].keyId), 4);
+  } finally { await s.close(); }
+});
