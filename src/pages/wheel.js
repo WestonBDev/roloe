@@ -50,8 +50,8 @@ async function face(entry) {
   return '<p class="what">Still reading. Open the card to watch.</p>';
 }
 
-// Draw the file before requests finish. Each face is hydrated once as its own request resolves,
-// then reused on resize; turns only change card angles.
+// Draw the file before requests finish. Each face updates as its request resolves (or shows a prompt
+// after 2.5 s), then its result is reused on resize; turns only change card angles.
 let faces = [];
 
 const rolo = $('#rolo');
@@ -139,11 +139,16 @@ if (!wheel.length) {
   rolo.addEventListener('pointerup', release);
   rolo.addEventListener('pointercancel', () => { y0 = null; settle(); });
 
+  const showFace = (i, html) => {
+    faces[i] = html;
+    const faceEl = leaves.find((l) => l.i === i)?.el.querySelector('.face');
+    if (faceEl) faceEl.innerHTML = html;
+  };
   wheel.forEach((entry, i) => {
+    const timeout = setTimeout(() => showFace(i, '<p class="what">Open the card to read it.</p>'), 2500);
     face(entry).then((html) => {
-      faces[i] = html;
-      const faceEl = leaves.find((l) => l.i === i)?.el.querySelector('.face');
-      if (faceEl) faceEl.innerHTML = html;
+      clearTimeout(timeout);
+      showFace(i, html);
     });
   });
 }
