@@ -27,7 +27,8 @@ test('the public URL routes to Service app on port 80, and lives in git (Argo se
   assert.ok(!read('README.md').includes('edit configmap'));
 });
 
-test('hardened pod: non-root, read-only root, no capabilities', () => {
+test('hardened pod: non-root, read-only root, no capabilities, no API token (Radar Checks)', () => {
+  assert.match(k8s, /automountServiceAccountToken: false/);
   assert.match(k8s, /runAsNonRoot: true/);
   assert.match(k8s, /readOnlyRootFilesystem: true/);
   assert.match(k8s, /drop: \["ALL"\]/);
