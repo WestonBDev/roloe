@@ -42,6 +42,9 @@ function notOwnerTyped(t) {
     || s.startsWith('# AGENTS.md')
     || s.startsWith('# Context from my IDE');
 }
+// Roloe's own meeting tools, and the instruction that starts the waiting loop.
+const ROLOE_TOOL = /roloe_(wait_for_tap|pull|post_findings|search_mine|findings_for_me)/;
+const ROLOE_PROMPT = /roloe_wait_for_tap|Wait for Roloe meetings|Roloe (encounter|meeting) e-[0-9a-f]{10}/i;
 const looksPasted = (t) => t.length > 2500 || /<pasted_content|```[\s\S]{1200,}```/.test(t);
 
 // ---------- Claude Code ----------
@@ -58,6 +61,9 @@ export function readClaudeSessions(projectDir, since) {
     if (statSync(path).mtime < since) continue;
     const session = basename(f, '.jsonl').replace(/-/g, '').slice(0, 8);
     let i = 0;
+    // Once the assistant calls a Roloe meeting tool, what it says restates someone else's material:
+    // skip it until the owner types something new.
+    let inMeeting = false;
     for (const line of readFileSync(path, 'utf8').split('\n')) {
       if (!line) continue;
       let o; try { o = JSON.parse(line); } catch { continue; }
@@ -69,9 +75,13 @@ export function readClaudeSessions(projectDir, since) {
         const texts = typeof c === 'string' ? [c] : Array.isArray(c) ? c.filter((b) => b.type === 'text').map((b) => b.text) : [];
         for (const t of texts) {
           if (notOwnerTyped(t)) continue;
+          if (ROLOE_PROMPT.test(t)) continue;
+          inMeeting = false;
           msgs.push({ kind: 'session', speaker: looksPasted(t) ? 'pasted' : 'owner', session, n: i++, ts, text: t, via: 'Claude Code' });
         }
       } else if (o.type === 'assistant' && Array.isArray(c)) {
+        if (c.some((b) => b.type === 'tool_use' && ROLOE_TOOL.test(b.name || ''))) inMeeting = true;
+        if (inMeeting) continue;
         const t = c.filter((b) => b.type === 'text').map((b) => b.text).join('\n').trim();
         if (t.length >= 40) msgs.push({ kind: 'session', speaker: 'assistant', session, n: i++, ts, text: t, via: 'Claude Code' });
       }
@@ -101,19 +111,23 @@ export function readCodexSessions(projectDir, since) {
       if (!(cwd === want || cwd.startsWith(want + '/'))) continue;
       const session = String(meta.id || meta.session_id || f).replace(/-/g, '').slice(-8);
       let i = 0;
+      let inMeeting = false;
       for (const line of lines) {
         if (!line) continue;
         let o; try { o = JSON.parse(line); } catch { continue; }
         const p = o.payload;
+        if (o.type === 'response_item' && /call/.test(p?.type || '') && ROLOE_TOOL.test(p?.name || '')) { inMeeting = true; continue; }
         if (o.type !== 'response_item' || p?.type !== 'message') continue;
         const ts = o.timestamp ? new Date(o.timestamp) : null;
         if (!ts || ts < since) continue;
         if (p.role === 'user') {
           for (const b of p.content || []) {
-            if (b.type !== 'input_text' || notOwnerTyped(b.text)) continue;
+            if (b.type !== 'input_text' || notOwnerTyped(b.text) || ROLOE_PROMPT.test(b.text)) continue;
+            inMeeting = false;
             msgs.push({ kind: 'session', speaker: looksPasted(b.text) ? 'pasted' : 'owner', session, n: i++, ts, text: b.text, via: 'Codex' });
           }
         } else if (p.role === 'assistant') {
+          if (inMeeting) continue;
           const t = (p.content || []).filter((b) => b.type === 'output_text').map((b) => b.text).join('\n').trim();
           if (t.length >= 40) msgs.push({ kind: 'session', speaker: 'assistant', session, n: i++, ts, text: t, via: 'Codex' });
         }
