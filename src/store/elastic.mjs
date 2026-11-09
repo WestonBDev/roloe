@@ -10,7 +10,7 @@ import { childSpan } from '../telemetry.mjs';
 const LICENSED = new Set(['trial', 'enterprise', 'platinum']);
 const SEMANTIC_CANDIDATES = ['.elser-2-elastic', '.elser-2-elasticsearch', '.multilingual-e5-small-elasticsearch'];
 
-export function elasticStore({ esUrl, esUser, esPassword, esApiKey, esIndex, fetchImpl = fetch }) {
+export function elasticStore({ esUrl, esUser, esPassword, esApiKey, esIndex, esInference = '', fetchImpl = fetch }) {
   const base = esUrl.replace(/\/$/, '');
   const index = esIndex;
   const basic = esApiKey ? `ApiKey ${esApiKey}` : 'Basic ' + Buffer.from(`${esUser}:${esPassword}`).toString('base64');
@@ -95,7 +95,8 @@ export function elasticStore({ esUrl, esUser, esPassword, esApiKey, esIndex, fet
         if (licensed && process.env.ROLOE_SEMANTIC !== 'off') {
           const inf = await es('GET', '/_inference/_all', undefined, { allow: [400, 403, 404] });
           const ids = (inf.json.endpoints || []).map((e) => e.inference_id);
-          info.inference_id = SEMANTIC_CANDIDATES.find((c) => ids.includes(c)) || null;
+          // ES_INFERENCE_ID (for example a Jina embedding endpoint) wins when this project has it.
+          info.inference_id = [esInference, ...SEMANTIC_CANDIDATES].find((c) => c && ids.includes(c)) || null;
         }
         const props = {
           passage_id: { type: 'keyword' }, owner_id: { type: 'keyword' }, owner_name: { type: 'keyword' },

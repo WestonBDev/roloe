@@ -18,6 +18,7 @@ What each sponsor tool does in Roloe, with links and numbers. Only what has actu
 - Elastic Cloud Serverless 9.7 project. The RRF retriever (BM25 + `semantic_text` on `.elser-2-elastic`) runs overlap retrieval at every meeting.
 - Scoped keys: Serverless refuses to derive a key with privileges from an API key. Its own words: *"creating derived api keys requires an explicit role descriptor that is empty (has no privileges)"*. So scope is the coordinator's `encounter_id` filter on every read, and the coordinator says so from startup. On a licensed cluster with user credentials, each meeting gets a document-level-security key (`scripts/elastic-check.mjs` prints the live mode and a raw no-filter proof).
 - Stop sends the old key back to Elasticsearch and records its answer (0 documents).
+- Jina embeddings: the project serves `.jina-embeddings-v5-text-small` (and v3, v5 nano, plus Jina rerankers). `ES_INFERENCE_ID` picks it for a new index; `scripts/embedding-check.mjs` compares it with ELSER on throwaway indexes. On 9 November, a query that shares no words with the right passage ("traces never arrive in my observability backend" → "the exporter sent no bearer header") put that passage first with both. Warm msearch: Jina 161 ms, ELSER 132 ms. The live index stays on ELSER; Jina is one setting away.
 - Open: encounter state and counts in Elastic (needed for the HPA); Agent Builder tools and Workflows (availability on Serverless to be checked); a "why this passage" view.
 
 ## Dash0: traces and metrics from the first route
