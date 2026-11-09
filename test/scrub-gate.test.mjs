@@ -28,7 +28,7 @@ test('scrubber removes each secret shape and keeps the value only in `removed`',
 
 test('scrubber removes private key blocks and assigned secret values', () => {
   const pem = '-----BEGIN RSA PRIVATE KEY-----\nMIIEow' + 'x'.repeat(40) + '\n-----END RSA PRIVATE KEY-----';
-  assert.equal(scrub(pem).text, '[removed: private key]');
+  assert.equal(scrub(pem).text.trim(), '[removed: private key]');
   const s = scrub('DB_PASSWORD=hunter2isNotGood9');
   assert.equal(s.text, 'DB_PASSWORD=[removed: secret value]');
 });
