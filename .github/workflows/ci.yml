@@ -13,5 +13,7 @@ jobs:
           node-version: 22
       - name: Install
         run: if [ -f package-lock.json ]; then npm ci; elif [ -f package.json ]; then npm install; else echo "no package.json yet"; fi
+      - name: Repo hygiene (no secret-shaped strings in tracked files)
+        run: node scripts/repo-scan.mjs
       - name: Test
         run: if [ -f package.json ]; then npm test; else echo "no tests yet"; fi
