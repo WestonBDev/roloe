@@ -19,3 +19,18 @@ export async function forwardRum(signal, body, contentType, { endpoint, headers,
   const res = await fetchImpl(`${base}/v1/${signal}`, { method: 'POST', headers: { 'content-type': 'application/json', ...headers }, body: scrubRum(body), signal: AbortSignal.timeout(10000) });
   return { status: res.ok ? 200 : 502 };
 }
+
+// Per-address sliding window. Only accepted hits are kept, so a flood costs nothing extra, and a
+// full map drops its least recently seen address, so rotating addresses can't reset everyone.
+export function rateLimiter({ limit = 120, windowMs = 60_000, maxAddresses = 5000 } = {}) {
+  const hits = new Map();
+  return (ip, now = Date.now()) => {
+    const recent = (hits.get(ip) || []).filter((t) => now - t < windowMs);
+    hits.delete(ip);
+    if (recent.length >= limit) { hits.set(ip, recent); return false; }
+    recent.push(now);
+    hits.set(ip, recent);
+    if (hits.size > maxAddresses) hits.delete(hits.keys().next().value);
+    return true;
+  };
+}

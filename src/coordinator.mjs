@@ -12,7 +12,7 @@ import { scrub } from './scrub.mjs';
 import { openStore } from './store/index.mjs';
 import { createEncounter, inboxEntry, stageLink, sideLink, newSide } from './encounter.mjs';
 import { readGuestInput, parseGuestLink } from './guest-input.mjs';
-import { forwardRum } from './rum-proxy.mjs';
+import { forwardRum, rateLimiter } from './rum-proxy.mjs';
 import { checkFinding } from './checks.mjs';
 import { step, hmac, destroyHmacKey, endEncounterTrace, startEncounterTrace } from './telemetry.mjs';
 import { secretShaped } from './scrub.mjs';
@@ -145,15 +145,10 @@ export function buildApp({ store, guestReader = readGuestInput, guestReadTimeout
     dash0Sdk ||= readFileSync(new URL('../node_modules/@dash0/sdk-web/dist/dash0.js', import.meta.url), 'utf8');
     send(res, 200, dash0Sdk, { 'content-type': 'text/javascript; charset=utf-8', 'cache-control': 'public, max-age=3600' });
   });
-  const rumHits = new Map();
+  const rumAllow = rateLimiter();
   r.add('POST', '/rum/v1/:signal', async ({ req, res, params }) => {
     const ip = process.env.ROLOE_TRUST_PROXY === '1' && req.headers['x-forwarded-for'] ? String(req.headers['x-forwarded-for']).split(',').pop().trim() : String(req.socket.remoteAddress || '');
-    const now = Date.now();
-    const hits = (rumHits.get(ip) || []).filter((t) => now - t < 60_000);
-    hits.push(now);
-    rumHits.set(ip, hits);
-    if (rumHits.size > 5000) rumHits.clear();
-    if (hits.length > 120) throw new HttpError(429, 'slow_down', 'Too many');
+    if (!rumAllow(ip)) throw new HttpError(429, 'slow_down', 'Too many');
     const chunks = [];
     let size = 0;
     for await (const c of req) { size += c.length; if (size > 600_000) throw new HttpError(413, 'too_large', 'Too large'); chunks.push(c); }
