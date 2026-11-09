@@ -10,11 +10,13 @@ const FRESH_MS = 10 * 60e3;   // the same window the wait tool uses
 const MAX_RUNNING = 3;
 const RUN_TIMEOUT_MS = 150_000;
 
-export function meetingsToAnswer(list, now, running) {
+// attempts: meeting id -> { n, last }. A run that ended without posting gets one retry, 30 s later.
+export function meetingsToAnswer(list, now, running, attempts = new Map()) {
   const room = MAX_RUNNING - running.size;
   if (room <= 0) return [];
   return list
-    .filter((e) => !e.posted && (e.status ?? 'open') === 'open' && now - Date.parse(e.created) < FRESH_MS && !running.has(e.id))
+    .filter((e) => !e.posted && (e.status ?? 'open') === 'open' && now - Date.parse(e.created) < FRESH_MS && !running.has(e.id)
+      && !((attempts.get(e.id)?.n || 0) >= 2) && now - (attempts.get(e.id)?.last || 0) > 30_000)
     .sort((a, b) => Date.parse(a.created) - Date.parse(b.created))
     .slice(0, room)
     .map((e) => e.id);
@@ -33,13 +35,17 @@ export function answerCommand(id, { bin, home, model = 'sonnet' }) {
 export async function runAnswerLoop(cfg, { home, model, log = console.log, pollMs = 2000, tryIt = true } = {}) {
   const bin = fileURLToPath(new URL('../bin/roloe.mjs', import.meta.url));
   const running = new Map();   // meeting id -> child
+  const attempts = new Map();  // meeting id -> { n, last }
   const { runGuestTryOnce } = await import('./guest-try.mjs');
   let tryBusy = false;
   for (;;) {
     try {
       // The header marks the owner's assistant as online on the guest's page.
       const { encounters } = await api(cfg, 'GET', '/api/me/encounters', undefined, { headers: { 'x-roloe-client': 'assistant' } });
-      for (const id of meetingsToAnswer(encounters, Date.now(), running)) {
+      for (const id of meetingsToAnswer(encounters, Date.now(), running, attempts)) {
+        const a = attempts.get(id) || { n: 0, last: 0 };
+        attempts.set(id, { n: a.n + 1, last: Date.now() });
+        if (attempts.size > 500) attempts.delete(attempts.keys().next().value);
         const { cmd, args, env } = answerCommand(id, { bin, home, model });
         const t0 = Date.now();
         const child = spawn(cmd, args, { env, stdio: 'ignore' });
