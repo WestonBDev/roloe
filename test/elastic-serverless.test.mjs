@@ -34,7 +34,9 @@ test('serverless: API-key auth, semantic + RRF on, scope falls back to the coord
   assert.equal(d.rrf, 'elasticsearch');
   assert.equal(d.semantic, true);
   assert.ok(calls.every((c) => c.auth === 'ApiKey main-key'));
-  const mapping = calls.find((c) => c.method === 'PUT').body.mappings.properties;
+  const put = calls.find((c) => c.method === 'PUT').body;
+  assert.equal(put.settings, undefined, 'Serverless refuses shard and replica settings');
+  const mapping = put.mappings.properties;
   assert.equal(mapping.text_semantic.type, 'semantic_text');
 
   const k = await store.createEncounterKey('e-1');
