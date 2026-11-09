@@ -1,6 +1,6 @@
 // Stage screen. The clock runs from the tap and stops green when Try it passes. If the live read
 // isn't in by the cutoff (1:40), the recorded run is shown, labelled, while the live clock runs.
-import { $, esc, api, hhmm, short, secs, whoseWords, isCode, replayView, replayEndMs, renderer, poll } from '/roloe.js';
+import { $, esc, api, hhmm, short, secs, whoseWords, isCode, replayView, replayEndMs, stageClock, renderer, poll } from '/roloe.js';
 
 const id = location.pathname.split('/').pop();
 const qs = new URLSearchParams(location.search);
@@ -54,29 +54,30 @@ function strip(v, label) {
 function render() {
   if (!live) return;
   const now = Date.now() + skew;
-  let v, clockMs, label, recLabel = '';
+  let v, label, recLabel = '', mode = 'live', replayElapsed = 0;
+  const liveElapsed = now - live.tap;
   if (replayOnly) {
-    clockMs = Math.min(now - skew - replayStart, replayEndMs(live));
-    v = replayView(live, clockMs);
+    mode = 'replay';
+    replayElapsed = Math.min(now - skew - replayStart, replayEndMs(live));
+    v = replayView(live, replayElapsed);
     label = `Recorded ${hhmm(live.tap)}`;
     recLabel = `Recorded ${hhmm(live.tap)} · replayed on its real clock`;
-    if (v.live.green_ms != null) clockMs = v.live.green_ms;
   } else {
-    clockMs = live.live.green_ms ?? (now - live.tap);
     const liveDone = live.live.all_findings_ms != null || live.live.green_ms != null;
-    const useRec = recorded && !liveDone && clockMs > cutoffS * 1000;
+    const useRec = recorded && !liveDone && liveElapsed > cutoffS * 1000;
     if (useRec) {
+      mode = 'fallback';
       if (recStart == null) recStart = Date.now();
       v = replayView(recorded, Date.now() - recStart);
       label = `Recorded ${hhmm(recorded.tap)}`;
       recLabel = `Showing the run recorded at ${hhmm(recorded.tap)} · live clock still running`;
     } else { v = live; label = 'Read live'; }
   }
+  const c = stageClock({ mode, liveElapsedMs: liveElapsed, replayElapsedMs: replayElapsed, live, view: v });
   const clock = $('#clock');
-  clock.textContent = fmt(clockMs);
-  const green = v.live.green_ms != null;
-  clock.classList.toggle('green', green);
-  $('#clocklabel').textContent = green ? 'tap → working help · stopped at Try it passed' : 'tap → working help';
+  clock.textContent = fmt(c.ms);
+  clock.classList.toggle('green', c.green);
+  $('#clocklabel').textContent = c.green ? 'tap → working help · stopped at Try it passed' : 'tap → working help';
   $('#reclabel').hidden = !recLabel;
   $('#reclabel').textContent = recLabel;
   $('#names').innerHTML = `${esc(v.names[v.a])} ↔ ${esc(v.names[v.b])}${v.same_person ? ' <span class="label rec">same person, two projects</span>' : ''}`;
