@@ -6,7 +6,7 @@ test('pages and assets are served with a strict CSP; the QR points at the guest 
   const s = await startTestServer();
   try {
     await twoCards(s);
-    for (const path of ['/g/wes', '/e/e-0000000000', '/stage/e-0000000000', '/me/wes', '/dashboard', '/c/wes', '/', '/how']) {
+    for (const path of ['/g/wes', '/e/e-0000000000', '/stage/e-0000000000', '/me/wes', '/dashboard', '/c/wes', '/', '/how', '/r']) {
       const r = await fetch(s.base + path);
       assert.equal(r.status, 200, path);
       assert.match(r.headers.get('content-type'), /text\/html/, path);
@@ -61,5 +61,18 @@ test('QR is the one entry point: full-screen QR page, scan wording, guest input 
     assert.match(stage, /id="judgeqr"/);
     const pj = await (await fetch(s.base + '/person.js')).text();
     assert.match(pj, /Still reading/, 'an honest waiting state past a minute');
+  } finally { await s.close(); }
+});
+
+test('the scanner\'s own Roloe: a stack of the cards they scanned, kept on their phone only', async () => {
+  const s = await startTestServer();
+  try {
+    const html = await (await fetch(s.base + '/r')).text();
+    assert.match(html, /Your Roloe/);
+    assert.match(html, /only on this phone/);
+    const js = await (await fetch(s.base + '/wheel.js')).text();
+    assert.match(js, /prefers-reduced-motion/);
+    const pj = await (await fetch(s.base + '/person.js')).text();
+    assert.match(pj, /roloe\.wheel/, 'each meeting a phone joins is filed on that phone');
   } finally { await s.close(); }
 });

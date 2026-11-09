@@ -21,7 +21,7 @@ function diffHtml(diff) {
 function page({ finding, from, diff, applyError }) {
   const when = finding?.credit?.ts ? new Date(finding.credit.ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<title>Roloe · Try it</title><link rel="preconnect" href="https://fonts.googleapis.com"><link href="https://fonts.googleapis.com/css2?family=Caveat:wght@500&family=Familjen+Grotesk:wght@400;600;700&family=IBM+Plex+Mono:wght@400;600&display=swap" rel="stylesheet">
+<title>Roloe · Try it</title><link rel="preconnect" href="https://fonts.googleapis.com"><link href="https://fonts.googleapis.com/css2?family=Caveat:wght@500&family=IBM+Plex+Sans:wght@400;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
 <style>${CSS}
 main.try { max-width: 1240px; display: grid; grid-template-columns: minmax(0, 2fr) minmax(300px, 1fr); gap: 24px; align-items: start; }
 @media (max-width: 980px) { main.try { grid-template-columns: 1fr; } }

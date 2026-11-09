@@ -1,9 +1,9 @@
 /* Roloe: everything is a card. Index-card stock, ruled lines, a red rule, a tab, two notches.
-   Familjen Grotesk for words, IBM Plex Mono for stamped data, Caveat for people's own words. */
+   IBM Plex Sans for words, JetBrains Mono for stamped data, Caveat for people's own words. */
 :root {
-  --desk: #d9dde0; --stock: #fcfcfa; --ink: #1b1d20; --pencil: #5b6168; --rule: #c6d6e8; --red: #c9392f;
+  --desk: #dcd6c8; --stock: #fbf6e9; --ink: #1d1b17; --pencil: #625b4f; --rule: #c9d4de; --red: #c4432f;
   --ok: #2e7a4c; --bad: #b3261e; --wait: #8a6a1f; --shadow: 0 1px 0 rgba(0,0,0,.06), 0 10px 28px rgba(20,24,28,.16);
-  --pitch: 28px; --sans: "Familjen Grotesk", "Helvetica Neue", Arial, sans-serif; --mono: "IBM Plex Mono", ui-monospace, Menlo, monospace;
+  --pitch: 28px; --sans: "IBM Plex Sans", "Helvetica Neue", Arial, sans-serif; --mono: "JetBrains Mono", ui-monospace, Menlo, monospace;
   --hand: "Caveat", "Bradley Hand", "Segoe Print", cursive;
   color-scheme: light;
 }
