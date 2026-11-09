@@ -118,7 +118,7 @@ const posting = new Set();
 export function buildApp({ store, guestReader = readGuestInput, guestReadTimeoutMs = 12000 }) {
   const r = router();
 
-  r.add('GET', '/healthz', ({ res }) => send(res, 200, { ok: true, otlp: otlpOn }));
+  r.add('GET', '/healthz', ({ res }) => { const d = store.describe(); send(res, 200, { ok: true, otlp: otlpOn, store: d.store, scope: d.scope, semantic: d.semantic }); });
 
   // ---------- Pages and assets ----------
   const page = (file) => ({ res }) => send(res, 200, PAGE(file), { 'content-type': 'text/html; charset=utf-8', 'content-security-policy': CSP });
