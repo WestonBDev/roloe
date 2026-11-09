@@ -56,3 +56,48 @@ test('approval page shows the literal diff; Approve runs the sandbox and stops t
     await ui.close();
   } finally { await s.close(); }
 });
+
+test('Try it page: a finding without a change says so; Docker down or a broken run fails cleanly and deletes the copy (Gitar)', async () => {
+  const s = await startTestServer();
+  const dir = mkdtempSync(join(tmpdir(), 'roloe-ui2-'));
+  const git = (...a) => execFileSync('git', ['-C', dir, ...a], { stdio: 'ignore' });
+  git('init', '-q'); git('config', 'user.email', 't@example.com'); git('config', 'user.name', 't');
+  writeFileSync(join(dir, 'package.json'), JSON.stringify({ name: 'p', scripts: { test: 'node --test' } }));
+  git('add', '.'); git('commit', '-qm', 'init');
+  try {
+    const reg = async (owner, passages) => {
+      const { body: { key } } = await s.call('POST', '/api/owners', { owner, name: owner });
+      const auth = { authorization: `Bearer ${key}` };
+      await s.call('POST', `/api/cards/${owner}/switch`, { on: true }, auth);
+      await s.call('PUT', `/api/cards/${owner}`, { passages }, auth);
+      return { auth, key };
+    };
+    const P = (id, text) => ({ passage_id: id, kind: 'session', speaker: 'owner', source: 's', locator: id, ts: new Date().toISOString(), text });
+    const giver = await reg('gil', [P('p-a00001', 'keep the package manifest valid json always')]);
+    const me = await reg('ray', [P('p-b00001', 'package manifest')]);
+    const { body: { id } } = await s.call('POST', '/api/tap', { to: 'ray' }, giver.auth);
+    await s.call('POST', `/api/e/${id}/findings`, { findings: [
+      { cites: 'p-a00001', quote: 'keep the package manifest', what: 'advice only' },
+      { cites: 'p-a00001', quote: 'valid json always', what: 'breaks the manifest', change: { edits: [{ file: 'package.json', find: '{"name"', replace: '{{"name"' }] } },
+    ] }, giver.auth);
+    const f = s.state().encounters[id].findings;
+    await assert.rejects(startTryUi({ cfg: { url: s.base, key: me.key, owner: 'ray', project: dir }, encounterId: id, findingId: f[0].id, port: 0 }), /no change/);
+    const before = new Set(readdirSync(join(homedir(), '.cache', 'roloe')));
+    process.env.ROLOE_DOCKER = 'off';
+    const ui = await startTryUi({ cfg: { url: s.base, key: me.key, owner: 'ray', project: dir }, encounterId: id, findingId: f[1].id, port: 0 });
+    await fetch(ui.url + 'approve', { method: 'POST' });
+    const r = await ui.done;
+    delete process.env.ROLOE_DOCKER;
+    assert.equal(r.state, 'failed');
+    const after = readdirSync(join(homedir(), '.cache', 'roloe')).filter((x) => x.startsWith(`try-${id}`) && !before.has(x));
+    assert.deepEqual(after, [], 'copy deleted');
+    await ui.close();
+    if (dockerAvailable()) {
+      const ui2 = await startTryUi({ cfg: { url: s.base, key: me.key, owner: 'ray', project: dir }, encounterId: id, findingId: f[1].id, port: 0 });
+      await fetch(ui2.url + 'approve', { method: 'POST' });
+      const r2 = await ui2.done;
+      assert.equal(r2.state, 'failed', 'a broken package.json fails the run instead of crashing the page');
+      await ui2.close();
+    }
+  } finally { await s.close(); }
+});

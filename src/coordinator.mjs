@@ -14,7 +14,7 @@ import { checkFinding } from './checks.mjs';
 import { step, hmac, destroyHmacKey, endEncounterTrace } from './telemetry.mjs';
 import { secretShaped } from './scrub.mjs';
 import { gate } from './gate.mjs';
-import { readFileSync, existsSync } from 'node:fs';
+import { readFileSync, existsSync, openSync, readSync, closeSync, statSync } from 'node:fs';
 import QRCode from 'qrcode';
 import { randomBytes } from 'node:crypto';
 import { newId } from './state.mjs';
@@ -123,7 +123,7 @@ export function buildApp({ store }) {
   r.add('GET', '/c/:owner', page('card.html'));
   r.add('GET', '/dashboard', page('dashboard.html'));
   r.add('GET', '/:asset', ({ res, params }) => {
-    const type = ASSETS[params.asset];
+    const type = Object.hasOwn(ASSETS, params.asset) ? ASSETS[params.asset] : null;
     if (!type) throw new HttpError(404, 'not_found', 'Not found');
     send(res, 200, PAGE(params.asset), { 'content-type': type, 'cache-control': 'no-cache' });
   });
@@ -396,7 +396,7 @@ export function buildApp({ store }) {
     if (!TRY_STATES.has(b.state)) throw new HttpError(400, 'bad_state', 'Unknown state');
     const num = (v) => (Number.isFinite(+v) && v !== null && v !== undefined ? Math.max(0, Math.round(+v)) : null);
     const now = Date.now();
-    enc.tryStatus = { finding: f.id, state: b.state, passed: num(b.passed), failed: num(b.failed), test_ms: num(b.test_ms), sandbox: cleanLine(b.sandbox || '', 80), at: now };
+    enc.tryStatus = { finding: f.id, state: b.state, passed: num(b.passed), failed: num(b.failed), test_ms: num(b.test_ms), sandbox: b.sandbox === 'docker-network-none' ? 'docker-network-none' : 'other', at: now };
     if (['passed', 'failed', 'declined', 'did-not-apply'].includes(b.state)) {
       await step('roloe.try', ref(enc), {
         'roloe.try.state': b.state, 'roloe.try.approved': !['declined', 'did-not-apply'].includes(b.state),
@@ -445,24 +445,32 @@ export function buildApp({ store }) {
   });
 
   // ---------- Stop: revoke the key, delete the copies, prove a query now returns nothing ----------
+  const stopping = new Map();   // encounter id -> the one stop in progress (both people may press Stop)
   r.add('POST', '/api/e/:id/stop', async ({ req, res, params, query }) => {
     const enc = getEncounter(params.id);
     const me = encSide(req, query, enc);
     if (enc.status !== 'open') return send(res, 200, enc.closed);
-    const result = await step('roloe.stop', ref(enc), {}, async (span) => {
-      await store.invalidateKey(enc.keyId);
-      const deleted = await store.deleteEncounter(enc.id);
-      // Ask the store itself with the old key (Elasticsearch answers 401 for a revoked key).
-      const after = await store.readsWithRevokedKey(enc.keyId);
-      span.setAttributes({ 'roloe.stop.deleted': deleted, 'roloe.stop.query_after_stop': after, 'roloe.stop.by': hmac(enc.id, me) });
-      return { deleted, query_after_stop: after };
-    });
-    enc.status = 'closed';
-    enc.closed = { at: new Date().toISOString(), by: me, ...result };
-    endEncounterTrace(enc.id, { 'roloe.closed': true });
-    destroyHmacKey(enc.id);
-    save();
-    send(res, 200, enc.closed);
+    if (!stopping.has(enc.id)) {
+      stopping.set(enc.id, (async () => {
+        const result = await step('roloe.stop', ref(enc), {}, async (span) => {
+          await store.invalidateKey(enc.keyId);
+          const deleted = await store.deleteEncounter(enc.id);
+          // The proof is the store's own answer to the old key. If the store can't answer right now,
+          // the meeting still closes and the receipt says the proof is unverified.
+          let after;
+          try { after = await store.readsWithRevokedKey(enc.keyId); } catch { after = 'unverified'; }
+          span.setAttributes({ 'roloe.stop.deleted': deleted, 'roloe.stop.query_after_stop': after, 'roloe.stop.by': hmac(enc.id, me) });
+          return { deleted, query_after_stop: after };
+        });
+        enc.status = 'closed';
+        enc.closed = { at: new Date().toISOString(), by: me, ...result };
+        endEncounterTrace(enc.id, { 'roloe.closed': true });
+        destroyHmacKey(enc.id);
+        save();
+        return enc.closed;
+      })().finally(() => stopping.delete(enc.id)));
+    }
+    send(res, 200, await stopping.get(enc.id));
   });
 
   // ---------- The stage screen ----------
@@ -473,9 +481,20 @@ export function buildApp({ store }) {
   });
 
   // ---------- A guest's tap: no install, no account ----------
+  // Guest taps need no account, so they're rate-limited: per address, and per card.
+  const guestHits = new Map();
+  const limited = (key, max, windowMs = 60_000) => {
+    const now = Date.now();
+    const hits = (guestHits.get(key) || []).filter((t) => now - t < windowMs);
+    hits.push(now);
+    guestHits.set(key, hits);
+    return hits.length > max;
+  };
   r.add('POST', '/api/g/:owner/start', async ({ req, res, params, span }) => {
     const o = state.owners[params.owner];
     if (!o) throw new HttpError(404, 'no_card', 'No card by that name');
+    const ip = String(req.headers['x-forwarded-for'] || req.socket.remoteAddress || '').split(',')[0].trim();
+    if (limited(`ip:${ip}`, 30) || limited(`card:${o.owner}`, 60)) throw new HttpError(429, 'slow_down', 'Too many taps on this card just now. Try again in a minute.');
     if (!o.sharing) throw new HttpError(409, 'switch_off', `${o.name}'s card isn't sharing right now`);
     const b = await readJson(req, 10_000);
     let link = null;
@@ -536,6 +555,32 @@ export function buildApp({ store }) {
   return r;
 }
 
+// Canary scan of exported telemetry, incremental: only bytes added since the last scan are read.
+// A newly registered canary restarts the scan from the beginning.
+const scanState = { offset: 0, hits: 0, tail: '', canaries: '' };
+function scanTelemetry() {
+  const key = state.canaries.join('\n');
+  if (key !== scanState.canaries) Object.assign(scanState, { offset: 0, hits: 0, tail: '', canaries: key });
+  let read = 0;
+  if (state.canaries.length && existsSync(traceFileRef)) {
+    const size = statSync(traceFileRef).size;
+    if (size < scanState.offset) Object.assign(scanState, { offset: 0, hits: 0, tail: '' });
+    if (size > scanState.offset) {
+      const fd = openSync(traceFileRef, 'r');
+      try {
+        const buf = Buffer.alloc(size - scanState.offset);
+        read = readSync(fd, buf, 0, buf.length, scanState.offset);
+        const text = scanState.tail + buf.toString('utf8', 0, read);
+        for (const c of state.canaries) scanState.hits += text.split(c).length - 1 - (scanState.tail.split(c).length - 1);
+        const keep = Math.max(...state.canaries.map((c) => c.length)) - 1;
+        scanState.tail = text.slice(-keep);
+        scanState.offset += read;
+      } finally { closeSync(fd); }
+    }
+  }
+  return { hits: scanState.hits, read, offset: scanState.offset };
+}
+
 const median = (xs) => { const v = xs.filter((x) => Number.isFinite(x)).sort((a, b) => a - b); if (!v.length) return null; const m = Math.floor(v.length / 2); return v.length % 2 ? v[m] : (v[m - 1] + v[m]) / 2; };
 
 export function dashboard(now = Date.now()) {
@@ -550,12 +595,7 @@ export function dashboard(now = Date.now()) {
     if (e.tries.some((t) => t.state === 'declined')) declined++;
     if (!e.times.green && e.tries.some((t) => t.state === 'failed' || t.state === 'did-not-apply')) failed++;
   }
-  let canaryHits = 0;
-  const tf = traceFileRef;
-  if (state.canaries.length && existsSync(tf)) {
-    const t = readFileSync(tf, 'utf8');
-    for (const c of state.canaries) canaryHits += t.split(c).length - 1;
-  }
+  const scan = scanTelemetry();
   return {
     meetings: encs.length,
     guests: encs.filter((e) => e.guest).length,
@@ -566,7 +606,8 @@ export function dashboard(now = Date.now()) {
     median_tap_to_findings_s: median(encs.map((e) => (e.times.first_findings ? (e.times.first_findings - e.times.tap) / 1000 : NaN))),
     median_tap_to_green_s: median(encs.map((e) => (e.times.green ? (e.times.green - e.times.tap) / 1000 : NaN))),
     canaries_registered: state.canaries.length,
-    canaries_in_telemetry: canaryHits,
+    canaries_in_telemetry: scan.hits,
+    telemetry_scan: { bytes_read_last: scan.read, bytes_total: scan.offset },
     updated: new Date(now).toISOString(),
   };
 }

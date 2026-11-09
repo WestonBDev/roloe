@@ -156,3 +156,45 @@ test('dashboard counts every meeting, including nothing strong, declined and fai
     assert.ok(d.median_tap_to_green_s >= 0);
   } finally { await s.close(); }
 });
+
+test('hardening: simultaneous stops agree, a failing stop proof still closes, guest starts are rate-limited, inherited names aren\'t assets (Gitar)', async () => {
+  const s = await startTestServer();
+  try {
+    const { id, k } = await meeting(s);
+    const [a, b] = await Promise.all([s.call('POST', `/api/e/${id}/stop?k=${k.wes}`), s.call('POST', `/api/e/${id}/stop?k=${k.aiden}`)]);
+    assert.equal(a.body.deleted, 4);
+    assert.equal(b.body.deleted, 4, 'the second stop reports the same receipt, not deleted: 0');
+
+    const m2 = await meeting2(s);
+    s.store.readsWithRevokedKey = async () => { throw Object.assign(new Error('timeout'), { code: 'es_timeout' }); };
+    const st = await s.call('POST', `/api/e/${m2.id}/stop?k=${m2.k.wes}`);
+    assert.equal(st.status, 200);
+    assert.equal(st.body.query_after_stop, 'unverified');
+    assert.equal(s.state().encounters[m2.id].status, 'closed');
+
+    const codes = [];
+    for (let i = 0; i < 35; i++) codes.push((await s.call('POST', '/api/g/wes/start', {})).status);
+    assert.ok(codes.includes(429), `rate limited: ${codes.join(',')}`);
+    assert.equal(codes[0], 201);
+
+    for (const name of ['constructor', 'toString', '__proto__', 'hasOwnProperty']) assert.equal((await fetch(`${s.base}/${name}`)).status, 404, name);
+  } finally { await s.close(); }
+});
+
+async function meeting2(s) {
+  const { body: { id } } = await s.call('POST', '/api/tap', { to: 'wes' }, { authorization: `Bearer ${s.keys.aiden}` });
+  const enc = s.state().encounters[id];
+  return { id, k: { aiden: enc.sides.aiden.key, wes: enc.sides.wes.key } };
+}
+
+test('the dashboard scans telemetry incrementally, not the whole file on every request (Gitar)', async () => {
+  const s = await startTestServer();
+  try {
+    const { wes } = await twoCards(s);
+    await s.call('POST', '/api/canaries', { value: 'canary-ABCDEFGHJKMNPQRSTVWX' }, wes);
+    const d1 = (await s.call('GET', '/api/dashboard')).body;
+    const d2 = (await s.call('GET', '/api/dashboard')).body;
+    assert.ok(d2.telemetry_scan.bytes_read_last < 4096, `second scan read ${d2.telemetry_scan.bytes_read_last} bytes`);
+    assert.equal(d1.canaries_in_telemetry, 0);
+  } finally { await s.close(); }
+});
