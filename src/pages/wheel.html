@@ -17,7 +17,8 @@
     touch-action: none; user-select: none; -webkit-user-select: none; cursor: grab; outline: none; }
   .spin { position: absolute; left: 50%; top: calc(var(--h) + var(--hub) + 40px); width: 0; height: 0; transform-style: preserve-3d; transform: rotateX(-9deg); }
   .leaf { position: absolute; left: calc(var(--w) / -2); top: calc((var(--h) + var(--hub)) * -1); width: var(--w); height: var(--h);
-    transform-origin: 50% calc(var(--h) + var(--hub)); will-change: transform; transition: transform 440ms cubic-bezier(.2,.9,.25,1.12); }
+    transform-origin: 50% calc(var(--h) + var(--hub)); will-change: transform; transition: transform 440ms cubic-bezier(.2,.9,.25,1.12);
+    backface-visibility: hidden; -webkit-backface-visibility: hidden; }   /* a card lying toward you shows no mirrored writing */
   /* One flat plane per card (never preserve-3d: its tab, paper and shade must not be sorted apart), kept painted, moved only by the compositor. */
   .rolo.dragging .leaf { transition: none; }
   .leaf .ltab { position: absolute; top: -25px; height: 26px; max-width: 46%; padding: 4px 12px 0; border-radius: 8px 8px 0 0; background: var(--stock);
