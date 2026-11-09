@@ -4,6 +4,8 @@ import { config } from './env.mjs';
 import { state, save, newId, newKey } from './state.mjs';
 import { startEncounterTrace, endEncounterTrace, destroyHmacKey, step, hmac } from './telemetry.mjs';
 import { computeOverlap } from './overlap.mjs';
+import { gate } from './gate.mjs';
+import { tokens } from './store/text.mjs';
 import { record } from './metrics.mjs';
 
 export const sideLink = (enc, who) => `${config.publicUrl}/e/${enc.id}?k=${enc.sides[who].key}`;
@@ -76,7 +78,35 @@ async function buildEncounter(store, enc, ref, a, b, guest, guestPassages) {
       });
     }
   }
+  // "Their words, instantly": the giver's best match for what the guest gave, verbatim and cited,
+  // shown before any model runs. Already scrubbed at indexing; the gate checks it again here.
+  if (guest && guestPassages.length && enc.overlap[a.owner]?.mine?.length) {
+    const ids = enc.overlap[a.owner].mine.slice(0, 3);
+    const docs = await store.getMany(enc.keyId, ids);
+    const ranked = ids.map((pid) => docs.find((d) => d.passage_id === pid && d.owner_id === a.owner)).filter(Boolean);
+    // Words read better than code on a phone: prefer prose among the top matches.
+    const best = ranked.find((d) => d.kind !== 'file') || ranked[0];
+    if (best) {
+      const text = bestExcerpt(best.text, new Set(guestPassages.flatMap((p) => tokens(p.text))));
+      if (text && gate(text, state.canaries).ok) {
+        enc.instant = { passage_id: best.passage_id, text, source: best.source, locator: best.locator, kind: best.kind, ts: best.ts,
+          whose: best.speaker === 'owner' && best.kind !== 'file' ? 'owner' : best.kind === 'commit' ? 'commit' : best.kind === 'file' ? 'file' : 'session' };
+      }
+    }
+  }
   enc.times.ready = Date.now();
+}
+
+// The sentence (or two) of a passage that shares the most words with what the guest gave: verbatim.
+export function bestExcerpt(text, want, max = 280) {
+  const t = String(text || '').trim();
+  if (t.length <= max) return t;
+  const parts = t.split(/(?<=[.!?])\s+|\n+/).map((x) => x.trim()).filter((x) => x.length > 12);
+  let bestI = 0, bestScore = -1;
+  parts.forEach((p, i) => { const sc = tokens(p).filter((w) => want.has(w)).length; if (sc > bestScore) { bestScore = sc; bestI = i; } });
+  let out = parts[bestI] || t.slice(0, max);
+  if (out.length < max * 0.6 && parts[bestI + 1] && (out + ' ' + parts[bestI + 1]).length <= max && t.includes(out + ' ' + parts[bestI + 1])) out = out + ' ' + parts[bestI + 1];
+  return out.length > max ? out.slice(0, max).replace(/\s+\S*$/, '') + '…' : out;
 }
 
 // What the inbox shows an owner about an encounter: never the other side's key.

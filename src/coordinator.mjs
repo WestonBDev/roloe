@@ -292,6 +292,7 @@ export function buildApp({ store, guestReader = readGuestInput, guestReadTimeout
     const key = bearer(req);
     const me = Object.values(state.owners).find((o) => key && sameHash(o.token_hash, sha256(key)));
     if (!me) throw new HttpError(401, 'unauthorized', 'Card key required');
+    me.last_seen = Date.now();   // the owner's assistant is checking in (memory only)
     const list = Object.values(state.encounters)
       .filter((e) => (e.a === me.owner || e.b === me.owner) && (query.get('all') || e.status === 'open'))
       .sort((x, y) => y.times.tap - x.times.tap)
@@ -510,6 +511,7 @@ export function buildApp({ store, guestReader = readGuestInput, guestReadTimeout
           return { deleted, query_after_stop: after };
         });
         enc.status = 'closed';
+        delete enc.instant;   // the passage it quoted was just deleted too
         enc.closed = { at: new Date().toISOString(), by: me, ...result };
         endEncounterTrace(enc.id, { 'roloe.closed': true });
         destroyHmacKey(enc.id);
@@ -810,6 +812,8 @@ export function personView(enc, me) {
   return {
     id: enc.id, status: enc.status, me, them, my_name: enc.names[me], their_name: enc.names[them], guest: Boolean(enc.guest), same_person: Boolean(enc.same_person),
     created: enc.created, times: enc.times,
+    instant: enc.guest && me === enc.b && enc.status === 'open' ? (enc.instant || null) : null,
+    their_assistant: (() => { const o = state.owners[them]; if (!o?.last_seen) return 'unknown'; return Date.now() - o.last_seen < 45000 ? 'online' : 'away'; })(),
     guest_input: enc.guest ? { kind: enc.guest.kind || 'none', error: enc.guest.error || null, link: enc.guest.link || null, files: enc.guest.files ?? null, passages: enc.guest.passages ?? 0 } : null,
     seal: { mine: sealView(mine.seal, true), theirs: sealView(theirs.seal, Boolean(theirs.seal?.revealed)) },
     their_side: { posted: theirs.posted, nothing_strong: theirs.nothing_strong },
