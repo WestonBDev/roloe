@@ -40,17 +40,22 @@ async function face(entry) {
     <p style="margin-top:8px"><a class="btn ghost" href="/e/${esc(entry.id)}?k=${encodeURIComponent(entry.key)}">Open this card</a></p>`;
 }
 
+let renderToken = 0;
 async function render(dir = 0) {
+  const token = ++renderToken;   // a later flip wins, even if its fetch finishes first
   const stack = $('#stack');
   if (!wheel.length) {
     stack.innerHTML = '<article class="card empty"><span class="tab">Empty</span><h2>No cards yet.</h2><p>Scan someone\'s Roloe QR, and they land here.</p></article>';
     return;
   }
   $('#controls').hidden = wheel.length < 2;
-  $('#count').textContent = `${i + 1} / ${wheel.length}`;
+  $('#count').textContent = `${i + 1} / ${wheel.length}`;   // set again below once this card is drawn
   const front = document.createElement('article');
   front.className = 'card';
-  front.innerHTML = await face(wheel[i]);
+  const at = i;
+  const html = await face(wheel[at]);
+  if (token !== renderToken) return;
+  front.innerHTML = html;
   const behind = wheel.slice(i + 1, i + 3).map((e, k) => `<article class="card behind" style="transform: translateY(${-(k + 1) * 10}px) scale(${1 - (k + 1) * 0.03}); opacity:${0.55 - k * 0.2}"><span class="tab">${esc(e.name)}</span><p>&nbsp;</p></article>`).reverse().join('');
   stack.innerHTML = behind;
   stack.append(front);
@@ -69,6 +74,8 @@ document.addEventListener('keydown', (e) => { if (e.key === 'ArrowDown' || e.key
 let y0 = null;
 $('#stack').addEventListener('pointerdown', (e) => { y0 = e.clientY; });
 $('#stack').addEventListener('pointerup', (e) => { if (y0 != null && Math.abs(e.clientY - y0) > 40) go(e.clientY < y0 ? 1 : -1); y0 = null; });
+$('#stack').addEventListener('pointercancel', () => { y0 = null; });
 $('#sound').onclick = () => { soundOn = !soundOn; store.set('roloe.sound', soundOn); $('#sound').textContent = soundOn ? 'Sound on' : 'Sound off'; $('#sound').setAttribute('aria-pressed', String(soundOn)); };
 $('#sound').textContent = soundOn ? 'Sound on' : 'Sound off';
+$('#sound').setAttribute('aria-pressed', String(soundOn));
 render();

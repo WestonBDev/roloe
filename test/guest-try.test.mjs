@@ -234,3 +234,22 @@ test('a change too large to show on a phone is declined up front, never truncate
     m.close();
   } finally { await s.close(); }
 });
+
+test('a guest meeting stopped (or failed) before it is built closes its trace (Gitar)', async () => {
+  const { openTraceCount } = await import('../src/telemetry.mjs');
+  const s = await startTestServer();
+  try {
+    await twoCards(s);
+    const { buildApp } = await import('../src/coordinator.mjs');
+    const before = openTraceCount();
+    const app = buildApp({ store: s.store, guestReader: async () => { await new Promise((r) => setTimeout(r, 300)); return { kind: 'text', passages: [], error: null }; } });
+    const srv = http.createServer(app.handle);
+    await new Promise((r) => srv.listen(0, '127.0.0.1', r));
+    const base = `http://127.0.0.1:${srv.address().port}`;
+    const g = await (await fetch(`${base}/api/g/wes/start`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ text: 'x y z' }) })).json();
+    await fetch(`${base}/api/e/${g.id}/stop?k=${g.key}`, { method: 'POST' });
+    await new Promise((r) => setTimeout(r, 600));
+    assert.equal(openTraceCount(), before, 'no root span left open');
+    srv.close();
+  } finally { await s.close(); }
+});
