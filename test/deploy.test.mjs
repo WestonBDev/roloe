@@ -37,3 +37,9 @@ test('hardened pod: non-root, read-only root, no capabilities, no API token (Rad
 test('no secret values in the manifests', () => {
   for (const f of [k8s, kust, argo]) assert.ok(!/ELASTIC_API_KEY:\s*\S|DASH0_AUTH_TOKEN:\s*\S|--from-literal=[A-Z_]+=[^.\s"$]/.test(f));
 });
+
+test('a startup probe checks every second, so a new pod is ready the moment it can serve (Radar investigation)', () => {
+  const probe = k8s.slice(k8s.indexOf('startupProbe:'), k8s.indexOf('readinessProbe:'));
+  assert.match(probe, /path: \/healthz/);
+  assert.match(probe, /periodSeconds: 1\b/);
+});
