@@ -63,8 +63,8 @@ export function memoryStore({ dataDir } = {}) {
       return { id };
     },
     async invalidateKey(id) { const k = keys.get(id); if (k) k.valid = false; persist(); },
-    async get(keyId, passageId) {
-      const d = scope(keyId).find((x) => x.passage_id === passageId);
+    async get(keyId, passageId, owner) {
+      const d = scope(keyId).find((x) => x.passage_id === passageId && (!owner || x.owner_id === owner));
       if (!d) return null;
       const { _tokens, ...rest } = d;
       return rest;
@@ -86,6 +86,6 @@ export function memoryStore({ dataDir } = {}) {
       persist();
       return before - docs.length;
     },
-    async scanFor(needle) { return docs.filter((d) => d.text.includes(needle)).length; },
+    async readsWithRevokedKey(keyId) { const k = keys.get(keyId); return k && k.valid ? docs.filter((d) => d.encounter_id === k.encounter_id).length : 0; },
   };
 }

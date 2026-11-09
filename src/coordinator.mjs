@@ -4,7 +4,7 @@ import http from 'node:http';
 import { fileURLToPath } from 'node:url';
 import { config } from './env.mjs';
 import { router, send, readJson, bearer, HttpError } from './http.mjs';
-import { state, load, save, sha256, newKey, sameHash, cleanOwnerId, cleanName, cleanLine } from './state.mjs';
+import { state, load, save, saveNow, sha256, newKey, sameHash, cleanOwnerId, cleanName, cleanLine } from './state.mjs';
 import { otlpOn, traceFile, flush } from './telemetry.mjs';
 import { scrub } from './scrub.mjs';
 import { openStore } from './store/index.mjs';
@@ -21,6 +21,17 @@ export function authOwner(req, ownerId) {
   const owner = state.owners[ownerId];
   if (!owner || !key || !sameHash(owner.token_hash, sha256(key))) throw new HttpError(401, 'unauthorized', 'Card key required');
   return owner;
+}
+
+// Hashes of a passage's substantial lines. Only hashes are kept, never the text.
+export function lineHashes(text) {
+  return [...new Set(String(text).split('\n').map((l) => l.trim()).filter((l) => l.length >= 12).map((l) => sha256(l).slice(0, 16)))];
+}
+export function looksPrivate(text, privLines) {
+  const hs = lineHashes(text);
+  if (!hs.length) return false;
+  const hit = hs.filter((h) => privLines.has(h)).length;
+  return hit >= Math.max(1, Math.ceil(hs.length / 2));
 }
 
 export function publicCard(o) {
@@ -115,13 +126,17 @@ export function buildApp({ store }) {
     const o = authOwner(req, params.owner);
     if (!o.sharing) throw new HttpError(409, 'switch_off', 'Sharing is off. Turn the switch on first.');
     const body = await readJson(req, 8_000_000);
+    // The switch may have gone off while the body was streaming.
+    if (!o.sharing) throw new HttpError(409, 'switch_off', 'Sharing is off. Turn the switch on first.');
     const priv = new Set(o.private);
+    const privLines = new Set(Object.values(o.private_fp || {}).flat());
     const seen = new Set();
     const passages = [];
     let rescrubbed = 0;
     for (const p of Array.isArray(body.passages) ? body.passages.slice(0, 600) : []) {
       const id = String(p.passage_id || '');
       if (!/^p-[0-9a-f]{6}$/.test(id) || priv.has(id) || seen.has(id)) continue;
+      if (privLines.size && looksPrivate(String(p.text || ''), privLines)) continue;
       seen.add(id);
       // Scrub again on arrival: the coordinator never trusts the client's scrubber alone.
       const s = scrub(String(p.text || '').slice(0, 1500));
@@ -138,6 +153,7 @@ export function buildApp({ store }) {
       });
     }
     await store.replaceCard(o.owner, o.name, passages);
+    if (!o.sharing) { await store.replaceCard(o.owner, o.name, []); throw new HttpError(409, 'switch_off', 'Sharing went off during the upload.'); }
     const t = body.totals || {};
     o.card = {
       passages: passages.length,
@@ -173,8 +189,13 @@ export function buildApp({ store }) {
     const { passage_id: id, private: priv = true } = await readJson(req);
     if (!/^p-[0-9a-f]{6}$/.test(String(id))) throw new HttpError(400, 'bad_passage', 'passage_id required');
     o.private = o.private.filter((x) => x !== id);
+    o.private_fp ||= {};
+    delete o.private_fp[id];
     if (priv) {
       o.private.push(id);
+      // Remember the passage by hashed lines too, so it stays private after its window shifts.
+      const p = (await store.listCard(o.owner)).find((x) => x.passage_id === id);
+      if (p) o.private_fp[id] = lineHashes(p.text);
       const n = await store.removeFromCard(o.owner, id);
       o.card.passages = Math.max(0, (o.card.passages || 0) - n);
     }
@@ -261,16 +282,23 @@ export function buildApp({ store }) {
     const me = encOwner(req, enc);
     if (enc.status !== 'open') throw new HttpError(410, 'stopped', 'This meeting was stopped');
     const side = enc.sides[me];
-    if (side.posted) throw new HttpError(409, 'already_posted', 'One post per side');
-    const body = await readJson(req);
+    if (side.posted || side.posting) throw new HttpError(409, 'already_posted', 'One post per side');
+    side.posting = true;   // claimed before any await, so a concurrent post can't slip in
+    let body;
+    try { body = await readJson(req); } catch (e) { side.posting = false; throw e; }
     const them = other(enc, me);
     const submitted = body.nothing_strong ? [] : (Array.isArray(body.findings) ? body.findings : []).slice(0, 10);
     const verdicts = await step('roloe.findings', ref(enc), { 'roloe.giver': hmac(enc.id, me) }, async (span) => {
+      try { return await postFindings(span); } catch (e) { side.posting = false; throw e; }
+    });
+    send(res, 200, { accepted: verdicts.filter((v) => v.accepted).length, verdicts });
+
+    async function postFindings(span) {
       const out = [];
       let accepted = 0;
       for (const [i, f] of submitted.entries()) {
         const v = await step('roloe.finding.check', ref(enc), { 'roloe.finding.index': i }, async (cs) => {
-          const r = await checkFinding(f, { get: (pid) => store.get(enc.keyId, pid), giver: me, recipient: them, canaries: state.canaries });
+          const r = await checkFinding(f, { get: (pid, owner) => store.get(enc.keyId, pid, owner), giver: me, recipient: them, canaries: state.canaries });
           if (r.accepted && accepted >= 3) { r.accepted = false; r.reason = 'more than 3'; }
           cs.setAttributes({ 'roloe.check.citation': r.checks.citation, 'roloe.check.quote': r.checks.quote, 'roloe.check.about': r.checks.about, 'roloe.check.gate': r.checks.gate, 'roloe.check.accepted': r.accepted, 'roloe.check.reason': r.reason || 'ok', 'roloe.cites_hmac': f?.cites ? hmac(enc.id, String(f.cites)) : '' });
           return r;
@@ -284,6 +312,7 @@ export function buildApp({ store }) {
         out.push({ index: i, accepted: v.accepted, reason: v.reason });
       }
       side.posted = true;
+      side.posting = false;
       side.posted_at = Date.now();
       side.nothing_strong = accepted === 0;
       const now = Date.now();
@@ -293,8 +322,7 @@ export function buildApp({ store }) {
       span.setAttributes({ 'roloe.findings.submitted': submitted.length, 'roloe.findings.accepted': accepted, 'roloe.findings.dropped': submitted.length - accepted, 'roloe.findings.nothing_strong': accepted === 0, 'roloe.ms_since_tap': now - enc.times.tap });
       save();
       return out;
-    });
-    send(res, 200, { accepted: verdicts.filter((v) => v.accepted).length, verdicts });
+    }
   });
 
   // Findings for the caller (assistant or Try it), with changes.
@@ -348,7 +376,8 @@ export async function start(port = config.port) {
     console.log(`[roloe] coordinator on ${config.publicUrl} (port ${port})`);
     console.log(`[roloe] traces → ${traceFile}${otlpOn ? ' and OTLP' : ' (OTLP off: set OTEL_EXPORTER_OTLP_ENDPOINT)'}`);
   });
-  const stop = async () => { await flush().catch(() => {}); process.exit(0); };
+  // Write any pending state before exiting: a key already sent to a caller must survive.
+  const stop = async () => { try { saveNow(); } catch { /* disk gone: nothing more to do */ } await flush().catch(() => {}); process.exit(0); };
   process.on('SIGTERM', stop);
   process.on('SIGINT', stop);
   return server;
