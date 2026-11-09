@@ -67,7 +67,7 @@ async function buildEncounter(store, enc, ref, a, b, guest, guestPassages) {
   {
     for (const [giver, recipient] of directions) {
       await step('roloe.overlap', ref, { 'roloe.giver': hmac(id, giver) }, async (span) => {
-        const o = await computeOverlap(store, enc.keyId, { giver, recipient, hybrid: store.describe().rrf === 'elasticsearch' });
+        const o = await computeOverlap(store, enc.keyId, { giver, recipient, hybrid: store.describe().rrf === 'elasticsearch', queriesFrom: guest ? 'recipient' : 'giver' });
         enc.overlap[giver] = { theirs: o.theirs, mine: o.mine };
         span.setAttributes({
           'roloe.overlap.queries': o.counts.queries, 'roloe.overlap.searches': o.counts.searches,

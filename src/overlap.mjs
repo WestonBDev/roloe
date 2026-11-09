@@ -23,7 +23,30 @@ export function pickQueries(passages, max = 40) {
 // Strip paths and URLs from the query text so filesystem layout never drives a match.
 const queryText = (p) => tokens(p.text).join(' ');
 
-export async function computeOverlap(store, keyId, { giver, recipient, theirsMax = 8, fileSlots = 3, mineMax = 8, hybrid = false }) {
+// For a guest, the direction flips: their material (one sentence, a page, a repo folder) is the query,
+// searched over the giver's whole card. A few searches, and "mine" is what answers them best.
+async function guestOverlap(store, keyId, { giver, recipient, theirsMax, mineMax, hybrid }) {
+  const theirsAll = await store.list(keyId, recipient);
+  const queries = theirsAll
+    .filter((p) => queryText(p))
+    .sort((a, b) => (b.speaker === 'owner') - (a.speaker === 'owner') || (/readme/i.test(b.source) - /readme/i.test(a.source)))
+    .slice(0, 12);
+  const results = queries.length ? await store.msearch(keyId, queries.map(queryText), { owner: giver, k: 6, hybrid }) : [];
+  const fused = new Map();
+  const credit = new Map();
+  results.forEach((hits, qi) => hits.forEach((h, rank) => {
+    if (tokens(h.text).length < 2) return;
+    const sc = 1 / (RRF_K + rank + 1);
+    fused.set(h.passage_id, (fused.get(h.passage_id) || 0) + sc);
+    credit.set(queries[qi].passage_id, (credit.get(queries[qi].passage_id) || 0) + sc);
+  }));
+  const mine = [...fused.entries()].sort((a, b) => b[1] - a[1]).slice(0, mineMax).map(([id]) => id);
+  const theirs = [...credit.entries()].sort((a, b) => b[1] - a[1]).slice(0, theirsMax).map(([id]) => id);
+  return { theirs, mine, counts: { queries: queries.length, searches: results.length, candidates: fused.size, theirs: theirs.length, mine: mine.length } };
+}
+
+export async function computeOverlap(store, keyId, { giver, recipient, theirsMax = 8, fileSlots = 3, mineMax = 8, hybrid = false, queriesFrom = 'giver' }) {
+  if (queriesFrom === 'recipient') return guestOverlap(store, keyId, { giver, recipient, theirsMax, mineMax, hybrid });
   const giverPassages = await store.list(keyId, giver);
   const queries = pickQueries(giverPassages).filter((p) => queryText(p));
   const results = queries.length ? await store.msearch(keyId, queries.map(queryText), { owner: recipient, k: 5, hybrid }) : [];
