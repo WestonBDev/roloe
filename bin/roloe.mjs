@@ -103,7 +103,7 @@ const commands = {
     const cfg = cfgFor();
     const r = await api(cfg, 'GET', '/api/me/encounters');
     if (!r.encounters.length) return out('No open meetings.');
-    for (const e of r.encounters) out(`${e.id}  with ${e.with_name}${e.guest ? ' (guest)' : ''}  ${e.posted ? 'posted' : 'not posted yet'}  ${e.link}`);
+    for (const e of r.encounters) out(`${e.id}  with ${e.with_name}${e.guest ? ' (guest)' : ''}  ${e.posted ? 'posted' : 'not posted yet'}\n  page:  ${e.link}\n  stage: ${e.stage}`);
   },
 
   async tap() {

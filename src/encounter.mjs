@@ -84,6 +84,6 @@ export function inboxEntry(enc, owner) {
   const other = enc.a === owner ? enc.b : enc.a;
   return {
     id: enc.id, with: other, with_name: enc.names[other], guest: Boolean(enc.guest), status: enc.status,
-    created: enc.created, link: sideLink(enc, owner), posted: enc.sides[owner].posted,
+    created: enc.created, link: sideLink(enc, owner), stage: stageLink(enc), posted: enc.sides[owner].posted,
   };
 }
