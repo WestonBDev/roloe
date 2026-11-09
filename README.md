@@ -142,7 +142,7 @@ set -a; . ~/roloe-elastic/es.env; set +a; npm test  # also runs the store contra
 ## Known limits
 
 - **Already-read passages can't be recalled.** Stop deletes the encounter's copies and revokes its key; it can't recall what an assistant already read, which may remain in that person's session history and with their model provider.
-- **Scope on unlicensed clusters.** On an Elasticsearch Basic license, document-level security is refused, and on Elastic Cloud Serverless keys with privileges can't be minted from an API key. In both cases the coordinator's `encounter_id` filter (applied on every read in every mode) carries scope, and the stage says which mode is live.
+- **Scope on Elastic Cloud Serverless and Basic.** Serverless authenticates with an API key, and Elasticsearch refuses to derive a key with privileges from one ("creating derived api keys requires an explicit role descriptor that is empty"); on a Basic license, document-level security is refused. In both cases the coordinator's `encounter_id` filter (applied on every read in every mode) carries scope, and the stage says which mode is live.
 - **One replica.** The coordinator holds encounter keys in memory and its records on one volume, so it runs as a single replica; a restart keeps cards and records but ends open encounters' reads. Scaling out needs that state moved into Elasticsearch.
 - **The Claude Code channel is a research preview** (`--dangerously-load-development-channels`); without it, the assistant waits on `roloe_wait_for_tap` like Codex.
 - **Mobile assistant connectors are untested.** Guests use the browser page.

@@ -68,15 +68,16 @@ export function elasticStore({ esUrl, esUser, esPassword, esApiKey, esIndex, fet
     mode: 'elasticsearch',
     describe: () => ({ ...info }),
     async init() {
-      const lic = await es('GET', '/_license', undefined, { allow: [400, 404, 410] });
+      // Serverless answers /_license too, so ask for the build flavor first.
+      const root = await es('GET', '/');
       let licensed;
-      if (lic.status === 200) {
+      if (root.json.version?.build_flavor === 'serverless') {
+        info.license = 'serverless';
+        licensed = true;
+      } else {
+        const lic = await es('GET', '/_license', undefined, { allow: [400, 404, 410] });
         info.license = lic.json.license?.type || 'unknown';
         licensed = LICENSED.has(info.license) && lic.json.license?.status === 'active';
-      } else {
-        const root = await es('GET', '/');
-        info.license = root.json.version?.build_flavor === 'serverless' ? 'serverless' : 'unknown';
-        licensed = info.license === 'serverless';
       }
       info.scope = licensed ? 'document-level security key' : 'coordinator filter (Basic license refuses DLS)';
       info.rrf = licensed ? 'elasticsearch' : 'coordinator';
@@ -97,7 +98,12 @@ export function elasticStore({ esUrl, esUser, esPassword, esApiKey, esIndex, fet
           props.text = { type: 'text', copy_to: 'text_semantic' };
           props.text_semantic = { type: 'semantic_text', inference_id: info.inference_id };
         }
-        await es('PUT', `/${index}`, { settings: { number_of_shards: 1, number_of_replicas: 0, refresh_interval: '1s' }, mappings: { properties: props } }, { allow: [400] });
+        const body = { mappings: { properties: props } };
+        if (info.license !== 'serverless') body.settings = { number_of_shards: 1, number_of_replicas: 0, refresh_interval: '1s' };
+        const r = await es('PUT', `/${index}`, body, { allow: [400] });
+        if (r.status === 400 && r.json?.error?.type !== 'resource_already_exists_exception') {
+          const e = new Error(`index create failed: ${r.json?.error?.type}: ${String(r.json?.error?.reason || "").slice(0, 200)}`); e.code = r.json?.error?.type || 'index_create_failed'; throw e;
+        }
       } else {
         const m = await es('GET', `/${index}/_mapping`);
         const sem = Object.values(m.json)[0]?.mappings?.properties?.text_semantic;
