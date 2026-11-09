@@ -207,3 +207,30 @@ test('two runners for the same owner never both prepare a job: the first claim w
     m.close();
   } finally { await s.close(); }
 });
+
+test('a change too large to show on a phone is declined up front, never truncated (Gitar)', async () => {
+  const { mkdtempSync, writeFileSync, mkdirSync, cpSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  const { execFileSync } = await import('node:child_process');
+  const { makeRunner } = await import('../src/guest-try.mjs');
+  const src = mkdtempSync(join(tmpdir(), 'roloe-gsrc4-'));
+  const git = (...a) => execFileSync('git', ['-C', src, ...a], { stdio: 'ignore' });
+  git('init', '-q'); git('config', 'user.email', 't@example.com'); git('config', 'user.name', 't');
+  mkdirSync(join(src, 'pkg'), { recursive: true });
+  writeFileSync(join(src, 'pkg', 'big.js'), 'MARK\n');
+  writeFileSync(join(src, 'pkg', 'package.json'), JSON.stringify({ name: 'pkg', scripts: { test: 'node --test' } }));
+  git('add', '.'); git('commit', '-qm', 'init');
+  const s = await startTestServer();
+  try {
+    const { wes } = await twoCards(s);
+    const m = await guestRepoMeeting(s);
+    const { g, call } = m;
+    await call('POST', `/api/e/${g.id}/findings`, { findings: [{ cites: 'p-e00001', quote: 'card watcher records refresh as done', about: 'p-b00001', what: 'a', change: { edits: [{ file: 'pkg/big.js', find: 'MARK', replace: 'x\n'.repeat(2000) }] } }] }, wes);
+    await makeRunner().once({ url: m.base, key: s.keys.wes, owner: 'wes' }, { clone: async (job, dest) => cpSync(src, dest, { recursive: true }), maxDiff: 2000 });
+    const t = (await call('GET', `/api/e/${g.id}?k=${g.key}`)).body.findings[0].try;
+    assert.equal(t.state, 'did-not-apply');
+    assert.match(t.reason, /too large/);
+    m.close();
+  } finally { await s.close(); }
+});

@@ -48,7 +48,7 @@ export function makeRunner() {
   const prepared = new Map();   // job key -> { dir, testDir, diff }
   const running = new Set();
 
-  async function once(cfg, { clone = gitClone } = {}) {
+  async function once(cfg, { clone = gitClone, maxDiff = 80_000 } = {}) {
     const { jobs } = await api(cfg, 'GET', '/api/me/try-jobs');
     const post = (job, body) => api(cfg, 'POST', `/api/e/${job.encounter_id}/guest-try`, { finding: job.finding, ...body }).then(() => true, () => false);
     // Declined, stopped or finished: its clone goes now, not when this process exits.
@@ -67,6 +67,8 @@ export function makeRunner() {
         if (job.state === 'diff-pending') {
           if (!(await post(job, { state: 'preparing' }))) continue;   // another runner claimed it
           const p = await safePrepare(job, clone);
+          // Show the whole diff or nothing: a truncated diff is not the literal change.
+          if (p.diff && p.diff.length > maxDiff) Object.assign(p, { state: 'did-not-apply', reason: 'This change is too large to show on a phone, so it is offered as advice only.', diff: '' });
           await post(job, { state: p.state, diff: p.diff, reason: p.reason, test_command: p.test_command });
           if (p.state === 'review') prepared.set(k, p); else if (p.dir) rmSync(p.dir, { recursive: true, force: true });
           continue;
