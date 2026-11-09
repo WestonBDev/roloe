@@ -118,3 +118,17 @@ test('replay ends after the last recorded moment, whatever it was', async () => 
   assert.equal(replayEndMs({ live: { ready_ms: 900, first_findings_ms: 9000, all_findings_ms: null, green_ms: null }, sides: { a: { posted_ms: 9000 }, b: { posted_ms: null } } }), 12000);
   assert.equal(replayEndMs({ live: { ready_ms: 900, first_findings_ms: 9000, all_findings_ms: 20000, green_ms: 26000 }, sides: {} }), 29000);
 });
+
+test('replay opens a sealed line only after the other side posted, as it happens live (Gitar)', () => {
+  const tap = Date.parse('2026-11-09T12:31:00Z');
+  const rec = {
+    tap, a: 'wes', b: 'aiden', names: { wes: 'Wes', aiden: 'Aiden' },
+    sides: {
+      wes: { posted: true, posted_ms: 20000, top: null, more: 0, nothing_strong: true, seal: null },
+      aiden: { posted: true, posted_ms: 9000, top: null, more: 0, nothing_strong: true, seal: { hash: 'h2', ts: new Date(tap + 2000).toISOString(), line: 'aiden expected this' } },
+    },
+    live: { ready_ms: 900, first_findings_ms: 9000, all_findings_ms: 20000, green_ms: null }, try: null,
+  };
+  assert.equal(replayView(rec, 10000).sides.aiden.seal.line, null, 'Wes has not posted yet at 0:10');
+  assert.equal(replayView(rec, 21000).sides.aiden.seal.line, 'aiden expected this');
+});
