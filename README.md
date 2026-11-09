@@ -146,6 +146,20 @@ npm test                                            # 38 tests: in-memory store,
 set -a; . ~/roloe-elastic/es.env; set +a; npm test  # also runs the store contract against a real Elasticsearch
 ```
 
+## Dash0: traces, counts and the time-to-help SLO
+
+Traces and metrics go to Dash0 over OTLP (`node scripts/otlp-check.mjs` sends one of each and prints whether Dash0 accepted them).
+
+| Metric | Type | Attributes | Used for |
+| --- | --- | --- | --- |
+| `roloe.meetings` | counter | `kind`: pair, guest, same_person | counts dashboard |
+| `roloe.findings` | counter | `outcome`: accepted, dropped, nothing_strong | counts dashboard |
+| `roloe.help` | counter | `outcome`: passed, failed, declined, did-not-apply | counts dashboard |
+| `roloe.time_to_help` | histogram, seconds, buckets 10…600 incl. **120** | none | **SLO** |
+| `roloe.time_to_findings` | histogram, seconds | none | counts dashboard |
+
+**SLO: time to working help.** 90% of meetings that reach a passing Try it get there within 120 s of the tap. Good events are `roloe.time_to_help` observations in the `le=120` bucket; total events are all observations. In Dash0's query builder the series appear under `otel_metric_name="roloe.time_to_help"`; pick the bucket and count series there, as the exact PromQL names depend on Dash0's mapping. The same numbers are on the coordinator's own `/dashboard` page.
+
 ## Pages
 
 | Route | Who | What |
@@ -155,6 +169,7 @@ set -a; . ~/roloe-elastic/es.env; set +a; npm test  # also runs the store contra
 | `/stage/<id>?k=` | Projector | Clock to green, sealed lines, one finding per side, Try it line, Prepared before / Read live strip; `&recorded=<id>&rk=<key>` for the labelled fallback after 1:40 (`&cutoff=` seconds to rehearse) |
 | `/me/<owner>#<key>` | Card owner | The switch, totals, every shared passage with Keep private |
 | `/dashboard` | Anyone | Meetings, help that worked, nothing strong, declined, failed, medians, canaries in telemetry |
+| `/how` | Projector | The architecture: each person's own laptop and subscription, and Roloe's services |
 | `/c/<owner>` | Print | 85 × 55 mm card, front and back with QR |
 
 ## Fallbacks, all labelled
