@@ -588,6 +588,8 @@ export function buildApp({ store, guestReader = readGuestInput, guestReadTimeout
           // Stopped while the meeting was being built: undo it and keep the stop.
           await store.invalidateKey(created.keyId).catch(() => {});
           await store.deleteEncounter(created.id).catch(() => {});
+          destroyHmacKey(created.id);   // the build re-created it after Stop destroyed it
+          endEncounterTrace(created.id, { 'roloe.closed': true });
           state.encounters[enc.id] = enc;
           save();
         }
