@@ -129,3 +129,23 @@ test('a citation resolves only to the giver\'s passage even when the recipient r
     assert.equal(s.state().encounters[id].findings[0].credit.name, 'Aiden');
   } finally { await s.close(); }
 });
+
+test('a bad body never locks a side out, and a post that fails midway leaves nothing behind (Gitar)', async () => {
+  const s = await startTestServer();
+  try {
+    const { aiden, id } = await tapped(s);
+    const res = await fetch(`${s.base}/api/e/${id}/findings`, { method: 'POST', headers: { ...aiden, 'content-type': 'application/json' }, body: 'null' });
+    assert.equal(res.status, 400);
+    const get = s.store.get.bind(s.store);
+    let calls = 0;
+    s.store.get = async (...a) => { if (++calls === 3) throw Object.assign(new Error('network'), { code: 'es_timeout' }); return get(...a); };
+    const failed = await s.call('POST', `/api/e/${id}/findings`, { findings: [good, good, good] }, aiden);
+    assert.equal(failed.status, 500);
+    assert.equal(s.state().encounters[id].findings.length, 0, 'no partial findings from the failed post');
+    s.store.get = get;
+    const ok = await s.call('POST', `/api/e/${id}/findings`, { findings: [good, good, good] }, aiden);
+    assert.equal(ok.status, 200);
+    assert.equal(s.state().encounters[id].findings.length, 3);
+    assert.ok(!JSON.stringify(s.state().encounters[id]).includes('posting'), 'claims are never persisted');
+  } finally { await s.close(); }
+});
