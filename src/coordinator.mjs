@@ -304,6 +304,36 @@ export function buildApp({ store }) {
     send(res, 200, { encounter_id: enc.id, from: enc.names[other(enc, me)], findings: enc.findings.filter((f) => f.recipient === me), nothing_strong: enc.sides[other(enc, me)].nothing_strong, posted: enc.sides[other(enc, me)].posted });
   });
 
+  // ---------- Try it progress, reported from the recipient's laptop (status and counts only) ----------
+  const TRY_STATES = new Set(['review', 'declined', 'did-not-apply', 'installing', 'testing', 'passed', 'failed']);
+  r.add('POST', '/api/e/:id/try', async ({ req, res, params }) => {
+    const enc = getEncounter(params.id);
+    const me = encOwner(req, enc);
+    const b = await readJson(req);
+    const f = enc.findings.find((x) => x.id === b.finding);
+    if (!f) throw new HttpError(404, 'no_finding', 'No such finding');
+    if (f.recipient !== me) throw new HttpError(403, 'not_recipient', 'Only the recipient runs Try it');
+    if (!TRY_STATES.has(b.state)) throw new HttpError(400, 'bad_state', 'Unknown state');
+    const num = (v) => (Number.isFinite(+v) && v !== null && v !== undefined ? Math.max(0, Math.round(+v)) : null);
+    const now = Date.now();
+    enc.tryStatus = { finding: f.id, state: b.state, passed: num(b.passed), failed: num(b.failed), test_ms: num(b.test_ms), sandbox: cleanLine(b.sandbox || '', 80), at: now };
+    if (['passed', 'failed', 'declined', 'did-not-apply'].includes(b.state)) {
+      await step('roloe.try', ref(enc), {
+        'roloe.try.state': b.state, 'roloe.try.approved': !['declined', 'did-not-apply'].includes(b.state),
+        'roloe.try.passed': num(b.passed) ?? -1, 'roloe.try.failed': num(b.failed) ?? -1, 'roloe.try.test_ms': num(b.test_ms) ?? -1,
+        'roloe.try.sandbox': enc.tryStatus.sandbox, 'roloe.finding_hmac': hmac(enc.id, f.id),
+        ...(b.state === 'passed' && !enc.times.green ? { 'roloe.time_to_green_ms': now - enc.times.tap } : {}),
+      }, async () => {});
+      enc.tries.push({ ...enc.tryStatus });
+    }
+    if (b.state === 'passed' && !enc.times.green) {
+      enc.times.green = now;
+      enc.thanks.push({ to: f.giver, from: me, finding: f.id, tests_passed: num(b.passed), ms_to_green: now - enc.times.tap, at: new Date(now).toISOString() });
+    }
+    save();
+    send(res, 200, { state: enc.tryStatus.state, green: enc.times.green });
+  });
+
   // ---------- The person's view (phone link) ----------
   r.add('GET', '/api/e/:id', ({ req, res, params, query }) => {
     const enc = getEncounter(params.id);
