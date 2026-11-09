@@ -60,3 +60,20 @@ test('ranking ignores filesystem paths so machine layout never matches', async (
   const o = await computeOverlap(store, id, { giver: 'a', recipient: 'b' });
   assert.deepEqual(o.theirs, []);
 });
+
+test('for a guest, their material is the query: a few searches over the giver\'s work, not forty over one sentence', async () => {
+  const store = memoryStore();
+  await store.init();
+  const wes = [P('p-a00001', 'Dash0 accepted spans only after the OTLP exporter got the Authorization Bearer header and the /v1/traces path'), P('p-a00002', 'picked a font for the stage'), P('p-a00003', 'export traces over OTLP HTTP to the collector endpoint', 'file', '')];
+  for (let i = 4; i < 60; i++) wes.push(P(`p-a000${String(i).padStart(2, '0')}`, `unrelated note number ${i} about cards and wheels`));
+  await store.replaceCard('wes', 'Wes', wes);
+  await store.copyCardsToEncounter('e-g', ['wes']);
+  await store.addToEncounter('e-g', 'guest-1', 'Guest', [P('p-b00001', 'no spans show up in my backend, is it the OTLP exporter or the auth header?')]);
+  const { id } = await store.createEncounterKey('e-g');
+  const o = await computeOverlap(store, id, { giver: 'wes', recipient: 'guest-1', queriesFrom: 'recipient' });
+  assert.ok(o.counts.queries <= 12, `queries ${o.counts.queries}`);
+  assert.equal(o.mine[0], 'p-a00001');
+  assert.ok(o.mine.includes('p-a00003'));
+  assert.ok(!o.mine.includes('p-a00002'));
+  assert.deepEqual(o.theirs, ['p-b00001']);
+});
