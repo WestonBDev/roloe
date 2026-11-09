@@ -19,6 +19,17 @@ export function authOwner(req, ownerId) {
   return owner;
 }
 
+// Hashes of a passage's substantial lines. Only hashes are kept, never the text.
+export function lineHashes(text) {
+  return [...new Set(String(text).split('\n').map((l) => l.trim()).filter((l) => l.length >= 12).map((l) => sha256(l).slice(0, 16)))];
+}
+export function looksPrivate(text, privLines) {
+  const hs = lineHashes(text);
+  if (!hs.length) return false;
+  const hit = hs.filter((h) => privLines.has(h)).length;
+  return hit >= Math.max(1, Math.ceil(hs.length / 2));
+}
+
 export function publicCard(o) {
   return { owner: o.owner, name: o.name, line: o.line, sharing: o.sharing, passages: o.card?.passages || 0, updated: o.card?.updated || null };
 }
@@ -64,13 +75,17 @@ export function buildApp({ store }) {
     const o = authOwner(req, params.owner);
     if (!o.sharing) throw new HttpError(409, 'switch_off', 'Sharing is off. Turn the switch on first.');
     const body = await readJson(req, 8_000_000);
+    // The switch may have gone off while the body was streaming.
+    if (!o.sharing) throw new HttpError(409, 'switch_off', 'Sharing is off. Turn the switch on first.');
     const priv = new Set(o.private);
+    const privLines = new Set(Object.values(o.private_fp || {}).flat());
     const seen = new Set();
     const passages = [];
     let rescrubbed = 0;
     for (const p of Array.isArray(body.passages) ? body.passages.slice(0, 600) : []) {
       const id = String(p.passage_id || '');
       if (!/^p-[0-9a-f]{6}$/.test(id) || priv.has(id) || seen.has(id)) continue;
+      if (privLines.size && looksPrivate(String(p.text || ''), privLines)) continue;
       seen.add(id);
       // Scrub again on arrival: the coordinator never trusts the client's scrubber alone.
       const s = scrub(String(p.text || '').slice(0, 1500));
@@ -87,6 +102,7 @@ export function buildApp({ store }) {
       });
     }
     await store.replaceCard(o.owner, o.name, passages);
+    if (!o.sharing) { await store.replaceCard(o.owner, o.name, []); throw new HttpError(409, 'switch_off', 'Sharing went off during the upload.'); }
     const t = body.totals || {};
     o.card = {
       passages: passages.length,
@@ -122,8 +138,13 @@ export function buildApp({ store }) {
     const { passage_id: id, private: priv = true } = await readJson(req);
     if (!/^p-[0-9a-f]{6}$/.test(String(id))) throw new HttpError(400, 'bad_passage', 'passage_id required');
     o.private = o.private.filter((x) => x !== id);
+    o.private_fp ||= {};
+    delete o.private_fp[id];
     if (priv) {
       o.private.push(id);
+      // Remember the passage by hashed lines too, so it stays private after its window shifts.
+      const p = (await store.listCard(o.owner)).find((x) => x.passage_id === id);
+      if (p) o.private_fp[id] = lineHashes(p.text);
       const n = await store.removeFromCard(o.owner, id);
       o.card.passages = Math.max(0, (o.card.passages || 0) - n);
     }
