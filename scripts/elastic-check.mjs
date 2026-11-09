@@ -23,5 +23,5 @@ try {
   console.log(raw === 2 ? 'PASS: the key alone limits reads to its encounter (document-level security).'
     : `Scope is the coordinator filter on this license (raw key sees ${raw}).`);
   await store.invalidateKey(k.id);
-  console.log('after stop, key reads:', await store.count(k.id));
+  console.log('after stop, Elasticsearch answers the old key with', await store.readsWithRevokedKey(k.id), 'documents');
 } finally { await store.dropIndex(); }

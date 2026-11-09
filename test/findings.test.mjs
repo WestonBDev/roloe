@@ -101,3 +101,31 @@ test('quotes: case and whitespace are normalized; under 3 words, over 400 chars,
     assert.equal(s.state().encounters[id].findings.length, 3);
   } finally { await s.close(); }
 });
+
+test('two posts from the same side at once: one wins, the other gets 409, never more than 3 (Gitar)', async () => {
+  const s = await startTestServer();
+  try {
+    const { aiden, id } = await tapped(s);
+    const many = { findings: [good, good, good] };
+    const get = s.store.get.bind(s.store);
+    s.store.get = async (...a) => { await new Promise((r) => setTimeout(r, 30)); return get(...a); }; // a real store answers over the network
+    const [r1, r2] = await Promise.all([s.call('POST', `/api/e/${id}/findings`, many, aiden), s.call('POST', `/api/e/${id}/findings`, many, aiden)]);
+    assert.deepEqual([r1.status, r2.status].sort(), [200, 409]);
+    assert.equal(s.state().encounters[id].findings.length, 3);
+  } finally { await s.close(); }
+});
+
+test('a citation resolves only to the giver\'s passage even when the recipient reuses its id (Gitar)', async () => {
+  const s = await startTestServer();
+  try {
+    const { aiden, wes } = await twoCards(s);
+    // Wes uploads a passage whose id copies Aiden's.
+    await s.call('PUT', '/api/cards/wes', { passages: [{ passage_id: 'p-a00001', kind: 'session', speaker: 'owner', source: 's', locator: 'x', ts: new Date().toISOString(), text: 'wes wrote this text himself today' }, { passage_id: 'p-e00001', kind: 'session', speaker: 'owner', source: 's', locator: 'y', ts: new Date().toISOString(), text: 'card watcher records refresh as done before the push succeeds' }] }, wes);
+    // Aiden refreshes his card afterwards, so Wes's clashing copy is found first by an unfiltered lookup.
+    await s.call('PUT', '/api/cards/aiden', { passages: [{ passage_id: 'p-a00001', kind: 'session', speaker: 'owner', source: 's', locator: 'p-a00001', ts: new Date().toISOString(), text: 'mark the combined total partial when one fetch fails to load, then retry the push' }] }, aiden);
+    const { body: { id } } = await s.call('POST', '/api/tap', { to: 'wes' }, aiden);
+    const r = await s.call('POST', `/api/e/${id}/findings`, { findings: [{ ...good }] }, aiden);
+    assert.equal(r.body.accepted, 1, 'Aiden\'s own p-a00001 is found despite the clash');
+    assert.equal(s.state().encounters[id].findings[0].credit.name, 'Aiden');
+  } finally { await s.close(); }
+});

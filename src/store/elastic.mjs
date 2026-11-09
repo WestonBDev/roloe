@@ -47,7 +47,7 @@ export function elasticStore({ esUrl, esUser, esPassword, esApiKey, esIndex, fet
     if (!docs.length) return 0;
     const lines = [];
     for (const d of docs) {
-      lines.push(JSON.stringify({ index: { _index: index, _id: `${d.encounter_id}:${d.passage_id}` } }));
+      lines.push(JSON.stringify({ index: { _index: index, _id: `${d.encounter_id}:${d.owner_id}:${d.passage_id}` } }));
       lines.push(JSON.stringify(d));
     }
     const { json } = await es('POST', '/_bulk?refresh=true', lines.join('\n') + '\n', { ndjson: true });
@@ -157,9 +157,9 @@ export function elasticStore({ esUrl, esUser, esPassword, esApiKey, esIndex, fet
       if (k) k.valid = false;
       if (k?.encoded) await es('DELETE', '/_security/api_key', { ids: [id] }, { allow: [404] });
     },
-    async get(keyId, passageId) {
+    async get(keyId, passageId, owner) {
       const k = keyAuth(keyId);
-      const hits = await searchAs(keyId, { size: 1, query: scoped(k.encounter_id, [], [{ term: { passage_id: passageId } }]) });
+      const hits = await searchAs(keyId, { size: 1, query: scoped(k.encounter_id, [], [{ term: { passage_id: passageId } }, ...(owner ? [{ term: { owner_id: owner } }] : [])]) });
       return hits[0] ? strip(hits[0]) : null;
     },
     async list(keyId, owner) {
@@ -210,9 +210,13 @@ export function elasticStore({ esUrl, esUser, esPassword, esApiKey, esIndex, fet
       const { json } = await es('POST', `/${index}/_delete_by_query?refresh=true&conflicts=proceed`, { query: { term: { encounter_id: enc } } }, { allow: [404] });
       return json.deleted || 0;
     },
-    async scanFor(needle) {
-      const { json } = await es('POST', `/${index}/_count`, { query: { match_phrase: { text: needle } } }, { allow: [404] });
-      return json.count || 0;
+    // After stop: send the old key to Elasticsearch itself. 0 means ES refused it (or it reads nothing).
+    async readsWithRevokedKey(keyId) {
+      const k = keys.get(keyId);
+      if (!k) return 0;
+      if (!k.encoded) return k.valid ? -1 : 0;   // coordinator-side handle: closed by valid=false
+      const r = await es('POST', `/${index}/_count`, { query: { term: { encounter_id: k.encounter_id } } }, { auth: `ApiKey ${k.encoded}`, allow: [401, 403] });
+      return r.status === 200 ? r.json.count : 0;
     },
     async dropIndex() { if (index.startsWith('roloe-test-')) await es('DELETE', `/${index}`, undefined, { allow: [404] }); },
   };
