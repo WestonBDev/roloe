@@ -54,7 +54,7 @@ const PAGES_DIR = new URL('./pages/', import.meta.url);
 const ASSETS = { 'roloe.css': 'text/css; charset=utf-8', 'stage.css': 'text/css; charset=utf-8', 'roloe.js': 'text/javascript; charset=utf-8',
   'person.js': 'text/javascript; charset=utf-8', 'guest.js': 'text/javascript; charset=utf-8', 'stage.js': 'text/javascript; charset=utf-8',
   'me.js': 'text/javascript; charset=utf-8', 'dashboard.js': 'text/javascript; charset=utf-8', 'card.js': 'text/javascript; charset=utf-8',
-  'qr.js': 'text/javascript; charset=utf-8' };
+  'qr.js': 'text/javascript; charset=utf-8', 'wheel.js': 'text/javascript; charset=utf-8' };
 const pageCache = new Map();
 const PAGE = (file) => {
   if (process.env.ROLOE_DEV || !pageCache.has(file)) pageCache.set(file, readFileSync(new URL(file, PAGES_DIR), 'utf8'));
@@ -131,6 +131,7 @@ export function buildApp({ store, guestReader = readGuestInput, guestReadTimeout
   r.add('GET', '/dashboard', page('dashboard.html'));
   r.add('GET', '/how', page('how.html'));
   r.add('GET', '/q/:owner', page('qr.html'));
+  r.add('GET', '/r', page('wheel.html'));
   r.add('GET', '/:asset', ({ res, params }) => {
     const type = Object.hasOwn(ASSETS, params.asset) ? ASSETS[params.asset] : null;
     if (!type) throw new HttpError(404, 'not_found', 'Not found');

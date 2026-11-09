@@ -40,6 +40,8 @@ async function main() {
   } else {
     $('#start').hidden = false;
   }
+  const w = store.get('roloe.wheel') || [];
+  if (w.length) $('#how').insertAdjacentHTML('afterend', `<p><a href="/r">Your Roloe on this phone (${w.length})</a></p>`);
   const prev = store.get(`roloe.guest.${owner}`);
   if (prev && Date.now() - prev.at < 3 * 3600e3) {
     $('#how').insertAdjacentHTML('afterend', `<p><a href="/e/${esc(prev.id)}?k=${encodeURIComponent(prev.key)}">Back to your meeting with ${esc(card.name)}</a></p>`);
