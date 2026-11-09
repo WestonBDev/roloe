@@ -103,7 +103,9 @@ if (!wheel.length) {
   rolo.hidden = true;
   $('#empty').innerHTML = '<article class="card empty"><span class="tab">Empty</span><h2>No cards yet.</h2><p>Scan someone\'s Roloe, and they land here.</p></article>';
 } else {
-  faces = await Promise.all(wheel.map(face));
+  // A slow or stalled meeting never holds the file back: after 2.5 s its card says so instead (Gitar).
+  const soon = (work) => Promise.race([work, new Promise((r) => setTimeout(() => r('<p class="what">Open the card to read it.</p>'), 2500))]);
+  faces = await Promise.all(wheel.map((e) => soon(face(e))));
   build();
   $('#controls').hidden = wheel.length < 2;
   label();
