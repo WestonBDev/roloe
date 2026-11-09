@@ -6,11 +6,16 @@ import { config } from './env.mjs';
 import { router, send, readJson, bearer, HttpError } from './http.mjs';
 import { state, load, save, sha256, newKey, sameHash, cleanOwnerId, cleanName, cleanLine } from './state.mjs';
 import { otlpOn, traceFile, flush } from './telemetry.mjs';
+const traceFileRef = traceFile;
 import { scrub } from './scrub.mjs';
 import { openStore } from './store/index.mjs';
 import { createEncounter, inboxEntry, stageLink, sideLink } from './encounter.mjs';
 import { checkFinding } from './checks.mjs';
-import { step, hmac } from './telemetry.mjs';
+import { step, hmac, destroyHmacKey, endEncounterTrace } from './telemetry.mjs';
+import { secretShaped } from './scrub.mjs';
+import { gate } from './gate.mjs';
+import { readFileSync, existsSync } from 'node:fs';
+import { randomBytes } from 'node:crypto';
 import { newId } from './state.mjs';
 
 const KINDS = new Set(['session', 'file', 'commit', 'link']);
@@ -334,6 +339,117 @@ export function buildApp({ store }) {
     send(res, 200, { state: enc.tryStatus.state, green: enc.times.green });
   });
 
+  // ---------- Sealed lines: the coordinator stores only the SHA-256 commitment until reveal ----------
+  r.add('POST', '/api/e/:id/seal', async ({ req, res, params, query }) => {
+    const enc = getEncounter(params.id);
+    const me = encSide(req, query, enc);
+    const side = enc.sides[me];
+    if (side.seal) throw new HttpError(409, 'sealed', 'Already sealed');
+    const b = await readJson(req);
+    if (b.skipped) side.seal = { skipped: true, ts: new Date().toISOString() };
+    else {
+      if (!/^[0-9a-f]{64}$/.test(String(b.hash))) throw new HttpError(400, 'bad_hash', 'hash must be SHA-256 hex');
+      side.seal = { hash: b.hash, ts: new Date().toISOString() };
+    }
+    await step('roloe.seal', ref(enc), { 'roloe.seal.skipped': Boolean(b.skipped), 'roloe.seal.commitment': side.seal.hash ? side.seal.hash.slice(0, 12) : '' }, async () => {});
+    save();
+    send(res, 200, sealView(side.seal, true));
+  });
+
+  r.add('POST', '/api/e/:id/reveal', async ({ req, res, params, query }) => {
+    const enc = getEncounter(params.id);
+    const me = encSide(req, query, enc);
+    const side = enc.sides[me];
+    const { line, nonce } = await readJson(req);
+    if (!side.seal?.hash) throw new HttpError(409, 'not_sealed', 'Nothing sealed');
+    if (sha256(`${nonce}|${line}`) !== side.seal.hash) throw new HttpError(400, 'mismatch', 'That line does not match the sealed hash');
+    side.seal.line = cleanLine(line, 160);
+    side.seal.revealed = new Date().toISOString();
+    save();
+    send(res, 200, sealView(side.seal, true));
+  });
+
+  // ---------- Stop: revoke the key, delete the copies, prove a query now returns nothing ----------
+  r.add('POST', '/api/e/:id/stop', async ({ req, res, params, query }) => {
+    const enc = getEncounter(params.id);
+    const me = encSide(req, query, enc);
+    if (enc.status !== 'open') return send(res, 200, enc.closed);
+    const result = await step('roloe.stop', ref(enc), {}, async (span) => {
+      await store.invalidateKey(enc.keyId);
+      const deleted = await store.deleteEncounter(enc.id);
+      const after = await store.count(enc.keyId);
+      span.setAttributes({ 'roloe.stop.deleted': deleted, 'roloe.stop.query_after_stop': after, 'roloe.stop.by': hmac(enc.id, me) });
+      return { deleted, query_after_stop: after };
+    });
+    enc.status = 'closed';
+    enc.closed = { at: new Date().toISOString(), by: me, ...result };
+    endEncounterTrace(enc.id, { 'roloe.closed': true });
+    destroyHmacKey(enc.id);
+    save();
+    send(res, 200, enc.closed);
+  });
+
+  // ---------- The stage screen ----------
+  r.add('GET', '/api/e/:id/stage', async ({ req, res, params, query }) => {
+    const enc = getEncounter(params.id);
+    if (!sameHash(sha256(enc.stageKey), sha256(String(query.get('k') || '')))) throw new HttpError(401, 'unauthorized', 'Stage key required');
+    send(res, 200, stageView(enc, store));
+  });
+
+  // ---------- A guest's tap: no install, no account ----------
+  r.add('POST', '/api/g/:owner/start', async ({ req, res, params, span }) => {
+    const o = state.owners[params.owner];
+    if (!o) throw new HttpError(404, 'no_card', 'No card by that name');
+    if (!o.sharing) throw new HttpError(409, 'switch_off', `${o.name}'s card isn't sharing right now`);
+    const b = await readJson(req, 10_000);
+    let link = null;
+    if (b.link) {
+      try { const u = new URL(String(b.link).trim()); if (u.protocol !== 'https:' || String(b.link).length > 300) throw 0; link = u.toString(); }
+      catch { throw new HttpError(400, 'bad_link', 'Paste an https link, or skip'); }
+    }
+    const guest = { owner: `guest-${randomBytes(3).toString('hex')}`, name: cleanName(b.name) || 'Guest' };
+    const enc = await createEncounter(store, o, guest, { guest: { link } });
+    span.setAttribute('roloe.encounter_id', enc.id);
+    send(res, 201, { id: enc.id, key: enc.sides[guest.owner].key, link: sideLink(enc, guest.owner) });
+  });
+
+  // ---------- The judge's extraction attempt ----------
+  r.add('POST', '/api/e/:id/probe', async ({ req, res, params, query }) => {
+    const enc = getEncounter(params.id);
+    encSide(req, query, enc);
+    const q = String((await readJson(req, 10_000)).q || '').trim().slice(0, 300);
+    const out = await step('roloe.probe', ref(enc), {}, async (span) => {
+      // Inbound: only secret-shaped requests are refused here. A known canary must reach scope.
+      const shaped = secretShaped(q);
+      if (shaped) {
+        span.setAttributes({ 'roloe.probe.request_gate': 'blocked', 'roloe.probe.scope_hits': -1 });
+        return { result: 'blocked', message: 'Blocked before sending. That looks like a secret, so Roloe won\'t search for it or send it.' };
+      }
+      if (q.length < 4) return { result: 'nothing', message: 'Type at least 4 characters.', scope_check: 'pass' };
+      const scoped = enc.status === 'open' ? await store.list(enc.keyId) : [];
+      const scopeOk = scoped.every((p) => p.encounter_id === enc.id);
+      const hits = scoped.filter((p) => p.text.toLowerCase().includes(q.toLowerCase()));
+      // Outbound: the response is gated against registered canaries.
+      const g = gate(JSON.stringify(hits.map((h) => h.text)), state.canaries);
+      span.setAttributes({ 'roloe.probe.request_gate': 'pass', 'roloe.probe.scope_hits': hits.length, 'roloe.probe.scope_size': scoped.length, 'roloe.scope_check': scopeOk ? 'pass' : 'fail', 'roloe.probe.response_gate': g.ok ? 'pass' : 'blocked' });
+      if (!g.ok) return { result: 'blocked', message: 'Blocked before sending. A match held a protected value.', scope_check: 'pass' };
+      if (!hits.length) return { result: 'nothing', scope_check: scopeOk ? 'pass' : 'fail', scope_size: scoped.length, message: `Nothing found. This meeting's key can't reach anything ${enc.names[enc.a]} didn't share.` };
+      return { result: 'found', scope_check: scopeOk ? 'pass' : 'fail', message: 'Found: this was shared on a card in this meeting.', matches: hits.slice(0, 5).map((h) => ({ passage_id: h.passage_id, owner: h.owner_name, locator: h.locator })) };
+    });
+    send(res, 200, { ...out, trace_id: enc.trace?.traceId });
+  });
+
+  r.add('POST', '/api/canaries', async ({ req, res }) => {
+    if (!ownerByKey(req)) throw new HttpError(401, 'unauthorized', 'Card key required');
+    const v = String((await readJson(req)).value || '');
+    if (v.length < 12 || v.length > 80) throw new HttpError(400, 'bad_canary', 'Canary must be 12–80 characters');
+    if (!state.canaries.includes(v)) state.canaries.push(v);
+    save();
+    send(res, 201, { registered: state.canaries.length });
+  });
+
+  r.add('GET', '/api/dashboard', ({ res }) => send(res, 200, dashboard()));
+
   // ---------- The person's view (phone link) ----------
   r.add('GET', '/api/e/:id', ({ req, res, params, query }) => {
     const enc = getEncounter(params.id);
@@ -342,6 +458,60 @@ export function buildApp({ store }) {
   });
 
   return r;
+}
+
+const median = (xs) => { const v = xs.filter((x) => Number.isFinite(x)).sort((a, b) => a - b); if (!v.length) return null; const m = Math.floor(v.length / 2); return v.length % 2 ? v[m] : (v[m - 1] + v[m]) / 2; };
+
+export function dashboard(now = Date.now()) {
+  const encs = Object.values(state.encounters);
+  let nothingStrong = 0, failed = 0, declined = 0;
+  for (const e of encs) {
+    for (const w of [e.a, e.b].filter((x) => !x.startsWith('guest-'))) {
+      const sd = e.sides[w];
+      if (sd.posted && sd.nothing_strong) nothingStrong++;
+      if (!sd.posted && now - e.times.tap > 5 * 60e3 && e.status === 'open') failed++;
+    }
+    if (e.tries.some((t) => t.state === 'declined')) declined++;
+    if (!e.times.green && e.tries.some((t) => t.state === 'failed' || t.state === 'did-not-apply')) failed++;
+  }
+  let canaryHits = 0;
+  const tf = traceFileRef;
+  if (state.canaries.length && existsSync(tf)) {
+    const t = readFileSync(tf, 'utf8');
+    for (const c of state.canaries) canaryHits += t.split(c).length - 1;
+  }
+  return {
+    meetings: encs.length,
+    guests: encs.filter((e) => e.guest).length,
+    help_that_worked: encs.filter((e) => e.times.green).length,
+    findings_accepted: encs.reduce((n, e) => n + e.findings.length, 0),
+    findings_dropped: encs.reduce((n, e) => n + e.dropped.length, 0),
+    nothing_strong: nothingStrong, declined, failed,
+    median_tap_to_findings_s: median(encs.map((e) => (e.times.first_findings ? (e.times.first_findings - e.times.tap) / 1000 : NaN))),
+    median_tap_to_green_s: median(encs.map((e) => (e.times.green ? (e.times.green - e.times.tap) / 1000 : NaN))),
+    canaries_registered: state.canaries.length,
+    canaries_in_telemetry: canaryHits,
+    updated: new Date(now).toISOString(),
+  };
+}
+
+export function stageView(enc, store) {
+  const side = (who) => {
+    const given = enc.findings.filter((f) => f.giver === who).sort((a, b) => a.rank - b.rank);
+    const top = given[0] ? (({ giver, recipient, change, ...f }) => ({ ...f, has_change: Boolean(change) }))(given[0]) : null;
+    const sd = enc.sides[who];
+    return { name: enc.names[who], posted: sd.posted, nothing_strong: sd.nothing_strong, posted_ms: sd.posted_at ? sd.posted_at - enc.times.tap : null, top, more: Math.max(0, given.length - 1), seal: sealView(sd.seal, Boolean(sd.seal?.revealed)) };
+  };
+  const t = enc.times;
+  const ms = (x) => (x ? x - t.tap : null);
+  return {
+    id: enc.id, status: enc.status, guest: Boolean(enc.guest), names: enc.names, a: enc.a, b: enc.b,
+    tap: t.tap, now: Date.now(),
+    sides: { [enc.a]: side(enc.a), [enc.b]: side(enc.b) },
+    prepared: Object.fromEntries([enc.a, enc.b].filter((o) => state.owners[o]).map((o) => [o, { passages: state.owners[o].card?.passages || 0, totals: state.owners[o].card?.totals || {}, updated: state.owners[o].card?.updated }])),
+    live: { ready_ms: ms(t.ready), first_findings_ms: ms(t.first_findings), all_findings_ms: ms(t.all_findings), green_ms: ms(t.green) },
+    try: enc.tryStatus, scope: store.describe().scope, store: store.describe().store, trace_id: enc.trace?.traceId,
+  };
 }
 
 export function sealView(seal, reveal) {
@@ -354,11 +524,10 @@ export function personView(enc, me) {
   const mine = enc.sides[me];
   const theirs = enc.sides[them];
   const findingsIn = enc.findings.filter((f) => f.recipient === me);
-  const revealed = Boolean(theirs.posted || enc.status !== 'open');
   return {
     id: enc.id, status: enc.status, me, them, my_name: enc.names[me], their_name: enc.names[them], guest: Boolean(enc.guest),
     created: enc.created, times: enc.times,
-    seal: { mine: sealView(mine.seal, true), theirs: sealView(theirs.seal, revealed && Boolean(theirs.seal?.revealed)) },
+    seal: { mine: sealView(mine.seal, true), theirs: sealView(theirs.seal, Boolean(theirs.seal?.revealed)) },
     their_side: { posted: theirs.posted, nothing_strong: theirs.nothing_strong },
     findings: findingsIn.map(({ giver, recipient, ...f }) => f),
     given: enc.findings.filter((f) => f.giver === me).map((f) => ({ id: f.id, what: f.what, helped: enc.thanks.find((t) => t.finding === f.id) || null })),
