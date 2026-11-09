@@ -2,6 +2,8 @@
 // any public https page, or one sentence. Nothing is fetched before they scan, nothing from a
 // private address, everything is scrubbed and capped, and it lives only in that meeting.
 import { lookup as dnsLookup } from 'node:dns/promises';
+import https from 'node:https';
+import { Readable } from 'node:stream';
 import { isIP } from 'node:net';
 import { createHash } from 'node:crypto';
 import { scrub } from './scrub.mjs';
@@ -41,6 +43,47 @@ export function isPublicAddress(addr) {
   return !(s === '::1' || s === '::' || s.startsWith('fc') || s.startsWith('fd') || s.startsWith('fe80'));
 }
 
+// The address checked is the address connected to: the lookup runs inside the connection itself,
+// so a host can't answer "public" to a check and "127.0.0.1" to the request (DNS rebinding).
+export function guardedLookup(lookup = dnsLookup) {
+  return (hostname, options, callback) => {
+    const cb = typeof options === 'function' ? options : callback;
+    const all = typeof options === 'object' && options?.all;
+    lookup(hostname, { all: true }).then((addrs) => {
+      if (!addrs.length || !addrs.every((a) => isPublicAddress(a.address))) return cb(Object.assign(new Error('That link is not on the public internet.'), { code: 'not_public' }));
+      if (all) cb(null, addrs); else cb(null, addrs[0].address, addrs[0].family);
+    }, cb);
+  };
+}
+
+// Default transport: node:https with the guarded lookup; the body is a stream, read under a cap.
+function httpsFetch(lookup) {
+  return (url, { signal, headers } = {}) => new Promise((resolve, reject) => {
+    const req = https.request(url, { headers, lookup: guardedLookup(lookup), signal }, (res) => {
+      resolve({ ok: res.statusCode >= 200 && res.statusCode < 300, status: res.statusCode, headers: { get: (k) => { const v = res.headers[String(k).toLowerCase()]; return v == null ? null : String(v); } }, body: Readable.toWeb(res) });
+    });
+    req.on('error', reject);
+    req.end();
+  });
+}
+
+// Read at most maxBytes from a body stream, then stop downloading.
+async function readCapped(body, maxBytes) {
+  if (!body) return Buffer.alloc(0);
+  const reader = body.getReader();
+  const parts = [];
+  let size = 0;
+  try {
+    while (size < maxBytes) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      parts.push(Buffer.from(value));
+      size += value.length;
+    }
+  } finally { reader.cancel().catch(() => {}); }
+  return Buffer.concat(parts).subarray(0, maxBytes);
+}
+
 async function safeFetch(url, { fetchImpl, lookup, maxBytes, deadline }) {
   let current = url;
   for (let hop = 0; hop < 4; hop++) {
@@ -51,8 +94,8 @@ async function safeFetch(url, { fetchImpl, lookup, maxBytes, deadline }) {
     const res = await fetchImpl(current, { redirect: 'manual', signal: AbortSignal.timeout(Math.max(500, deadline - Date.now())), headers: { 'user-agent': 'roloe-guest-reader', accept: 'text/html,text/plain,application/json;q=0.9,*/*;q=0.5' } });
     if (res.status >= 300 && res.status < 400 && res.headers.get('location')) { current = new URL(res.headers.get('location'), current).toString(); continue; }
     if (!res.ok) throw Object.assign(new Error(`That link answered ${res.status}.`), { code: `http_${res.status}` });
-    const buf = Buffer.from(await res.arrayBuffer());
-    return { text: buf.subarray(0, maxBytes).toString('utf8'), type: res.headers.get('content-type') || '' };
+    const buf = await readCapped(res.body, maxBytes);
+    return { text: buf.toString('utf8'), type: res.headers.get('content-type') || '' };
   }
   throw Object.assign(new Error('Too many redirects.'), { code: 'redirects' });
 }
@@ -89,20 +132,32 @@ async function readGithub(g, opts) {
   const u = new URL(url);
   const addrs = await opts.lookup(u.hostname, { all: true });
   if (!addrs.length || !addrs.every((a) => isPublicAddress(a.address))) throw Object.assign(new Error('not public'), { code: 'not_public' });
-  const res = await opts.fetchImpl(url, { signal: AbortSignal.timeout(Math.max(500, opts.deadline - Date.now())), headers: { 'user-agent': 'roloe-guest-reader' } });
-  if (!res.ok || !res.body) throw Object.assign(new Error(`GitHub answered ${res.status}`), { code: `http_${res.status}` });
   const prefix = g.path ? g.path.replace(/\/$/, '') : '';
   const wanted = (path, size) => (!prefix || path === prefix || path.startsWith(prefix + '/')) && TEXT_EXT.test(path) && !SKIP.test(path) && size <= MAX_FILE_BYTES;
   const candidates = [];
   let candidateBytes = 0;
-  // With a folder, leave time to fall back to walking the tree if the tarball can't reach it.
-  const tarDeadline = prefix ? Math.min(opts.deadline, Date.now() + (opts.deadline - Date.now()) * 0.55) : opts.deadline;
-  const { cutOff } = await untar(res.body, {
-    maxBytes: MAX_TARBALL_BYTES,
-    deadline: tarDeadline,
-    onFile(path, size) { return wanted(path, size) && candidateBytes < 3_000_000 && candidates.length < 400; },
-    file(path, buf) { candidates.push({ path, text: buf.toString('utf8') }); candidateBytes += buf.length; },
-  });
+  // With a folder, leave time to fall back to walking the tree if the tarball can't reach it:
+  // the deadline covers the request itself too, since codeload builds big tarballs on the fly.
+  const tarDeadline = prefix ? Math.round(Date.now() + (opts.deadline - Date.now()) * 0.55) : opts.deadline;
+  let cutOff = false;
+  try {
+    const ac = new AbortController();
+    let t;
+    const res = await Promise.race([
+      opts.fetchImpl(url, { signal: ac.signal, headers: { 'user-agent': 'roloe-guest-reader' } }),
+      new Promise((_, rej) => { t = setTimeout(() => { ac.abort(); rej(Object.assign(new Error('tarball too slow'), { code: 'slow' })); }, Math.max(300, tarDeadline - Date.now())); }),
+    ]).finally(() => clearTimeout(t));
+    if (!res.ok || !res.body) throw Object.assign(new Error(`GitHub answered ${res.status}`), { code: `http_${res.status}` });
+    ({ cutOff } = await untar(res.body, {
+      maxBytes: MAX_TARBALL_BYTES,
+      deadline: tarDeadline,
+      onFile(path, size) { return wanted(path, size) && candidateBytes < 3_000_000 && candidates.length < 400; },
+      file(path, buf) { candidates.push({ path, text: buf.toString('utf8') }); candidateBytes += buf.length; },
+    }));
+  } catch (e) {
+    if (!prefix || e.code === 'not_public') throw e;
+    cutOff = true;
+  }
   if (prefix && !candidates.length && cutOff) candidates.push(...await walkFolder(g, prefix, opts, wanted));
   // READMEs first, then shallow paths, then the rest.
   candidates.sort((a, b) => (/readme/i.test(b.path) - /readme/i.test(a.path)) || (a.path.split('/').length - b.path.split('/').length) || a.path.localeCompare(b.path));
@@ -221,9 +276,9 @@ function friendly(e, kind) {
   return kind === 'github' ? 'Couldn\'t read that repo just now.' : 'Couldn\'t read that page just now.';
 }
 
-export async function readGuestInput({ link, text } = {}, { fetchImpl = fetch, lookup = dnsLookup, timeoutMs = TIMEOUT_MS } = {}) {
+export async function readGuestInput({ link, text } = {}, { fetchImpl, lookup = dnsLookup, timeoutMs = TIMEOUT_MS } = {}) {
   const deadline = Date.now() + timeoutMs;
-  const opts = { fetchImpl, lookup, deadline };
+  const opts = { fetchImpl: fetchImpl || httpsFetch(lookup), lookup, deadline };
   const out = { kind: 'none', passages: [], error: null };
   const sentence = String(text || '').trim().slice(0, 600);
   if (sentence) {

@@ -41,7 +41,11 @@ async function guestOverlap(store, keyId, { giver, recipient, theirsMax, mineMax
     credit.set(queries[qi].passage_id, (credit.get(queries[qi].passage_id) || 0) + sc);
   }));
   const mine = [...fused.entries()].sort((a, b) => b[1] - a[1]).slice(0, mineMax).map(([id]) => id);
-  const theirs = [...credit.entries()].sort((a, b) => b[1] - a[1]).slice(0, theirsMax).map(([id]) => id);
+  // Everything the guest chose to share is theirs to be read, even when nothing on the card
+  // matched it: what found matches first, then the rest (their own words before files).
+  const hitIds = [...credit.entries()].sort((a, b) => b[1] - a[1]).map(([id]) => id);
+  const rest = queries.map((q) => q.passage_id).filter((id) => !credit.has(id));
+  const theirs = [...hitIds, ...rest].slice(0, theirsMax);
   return { theirs, mine, counts: { queries: queries.length, searches: results.length, candidates: fused.size, theirs: theirs.length, mine: mine.length } };
 }
 

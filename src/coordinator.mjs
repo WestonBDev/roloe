@@ -479,6 +479,14 @@ export function buildApp({ store, guestReader = readGuestInput, guestReadTimeout
   r.add('POST', '/api/e/:id/stop', async ({ req, res, params, query }) => {
     const enc = getEncounter(params.id);
     const me = encSide(req, query, enc);
+    if (enc.status === 'preparing') {
+      // Still opening: nothing has been copied yet. Close it now; the background task sees this
+      // and copies nothing (or removes what it just made).
+      enc.status = 'closed';
+      enc.closed = { at: new Date().toISOString(), by: me, deleted: 0, query_after_stop: 0, before_open: true };
+      save();
+      return send(res, 200, enc.closed);
+    }
     if (enc.status !== 'open') return send(res, 200, enc.closed);
     if (!stopping.has(enc.id)) {
       stopping.set(enc.id, (async () => {
@@ -557,11 +565,19 @@ export function buildApp({ store, guestReader = readGuestInput, guestReadTimeout
           sp.setAttributes({ 'roloe.guest.kind': r.kind, 'roloe.guest.passages': r.passages.length, 'roloe.guest.read_ok': !r.error });
           return r;
         });
-        await createEncounter(store, o, guest, {
+        if (enc.status !== 'preparing') return;   // stopped while their link was being read
+        const created = await createEncounter(store, o, guest, {
           preset,
           guest: { link: link || null, kind: input.kind, error: input.error, repo: input.repo || null, ref: input.ref || null, path: input.path || null, files: input.files ?? null, passages: input.passages.length },
           guestPassages: input.passages,
         });
+        if (enc.status === 'closed') {
+          // Stopped while the meeting was being built: undo it and keep the stop.
+          await store.invalidateKey(created.keyId).catch(() => {});
+          await store.deleteEncounter(created.id).catch(() => {});
+          state.encounters[enc.id] = enc;
+          save();
+        }
       } catch (e) {
         enc.status = 'failed';
         enc.guest.error = 'This meeting could not be opened. Scan the card again to retry.';
