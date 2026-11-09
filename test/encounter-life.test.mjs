@@ -198,3 +198,13 @@ test('the dashboard scans telemetry incrementally, not the whole file on every r
     assert.equal(d1.canaries_in_telemetry, 0);
   } finally { await s.close(); }
 });
+
+test('the guest rate limit can\'t be dodged with a forged X-Forwarded-For (Gitar)', async () => {
+  const s = await startTestServer();
+  try {
+    await twoCards(s);
+    const codes = [];
+    for (let i = 0; i < 35; i++) codes.push((await s.call('POST', '/api/g/wes/start', {}, { 'x-forwarded-for': `10.0.0.${i}` })).status);
+    assert.ok(codes.includes(429), 'forged addresses are ignored unless a trusted proxy is configured');
+  } finally { await s.close(); }
+});
