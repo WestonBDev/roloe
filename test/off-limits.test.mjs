@@ -14,11 +14,11 @@ const run = promisify(execFile);
 const BIN = new URL('../bin/roloe.mjs', import.meta.url).pathname;
 
 test('off-limits terms are removed whole-word and case-insensitively; the gate blocks them', () => {
-  const r = applyOffLimits('Met Aiden and AIDEN-team; aidenville stays. Client: Globex Corp.', ['Aiden', 'Globex Corp']);
-  assert.equal(r.text, 'Met [removed: off-limits] and [removed: off-limits]-team; aidenville stays. Client: [removed: off-limits].');
+  const r = applyOffLimits('Met Zorvel and ZORVEL-team; zorvelville stays. Client: Quintrax Labs.', ['Zorvel', 'Quintrax Labs']);
+  assert.equal(r.text, 'Met [removed: off-limits] and [removed: off-limits]-team; zorvelville stays. Client: [removed: off-limits].');
   assert.equal(r.count, 3);
-  assert.equal(gate('a finding mentioning aiden', [], ['Aiden']).ok, false);
-  assert.equal(gate('a finding about aidenville', [], ['Aiden']).ok, true);
+  assert.equal(gate('a finding mentioning zorvel', [], ['Zorvel']).ok, false);
+  assert.equal(gate('a finding about zorvelville', [], ['Zorvel']).ok, true);
 });
 
 test('roloe off-limits: the terms never reach the coordinator, and a finding with one is blocked locally', async () => {
@@ -28,19 +28,19 @@ test('roloe off-limits: the terms never reach the coordinator, and a finding wit
   mkdirSync(project);
   const git = (...a) => execFileSync('git', ['-C', project, ...a], { stdio: 'ignore' });
   git('init', '-q'); git('config', 'user.email', 't@example.com'); git('config', 'user.name', 't');
-  writeFileSync(join(project, 'notes.md'), 'Paired with Claire on the retry logic for the Globex Corp deploy.\n');
+  writeFileSync(join(project, 'notes.md'), 'Paired with Zorvel on the retry logic for the Quintrax Labs deploy.\n');
   git('add', '.'); git('commit', '-qm', 'notes');
   const env = { ...process.env, HOME: home, ROLOE_HOME: join(home, '.roloe') };
   try {
     await run('node', [BIN, 'on', '--url', s.base, '--owner', 'olga', '--name', 'Olga', '--project', project], { env });
-    const out = await run('node', [BIN, 'off-limits', 'add', 'Claire', 'Globex Corp'], { env });
+    const out = await run('node', [BIN, 'off-limits', 'add', 'Zorvel', 'Quintrax Labs'], { env });
     assert.match(out.stdout, /2 off-limits terms/);
     const cfg = JSON.parse(readFileSync(join(home, '.roloe', 'olga.json'), 'utf8'));
     const card = await s.call('GET', '/api/cards/olga/passages', null, { authorization: `Bearer ${cfg.key}` });
     const all = JSON.stringify(card.body);
-    assert.ok(!/claire|globex/i.test(all), 'not on the card, not in the store');
+    assert.ok(!/zorvel|quintrax/i.test(all), 'not on the card, not in the store');
     assert.match(all, /\[removed: off-limits\]/);
     const list = await run('node', [BIN, 'off-limits', 'list'], { env });
-    assert.match(list.stdout, /Claire/);
+    assert.match(list.stdout, /Zorvel/);
   } finally { await s.close(); }
 });

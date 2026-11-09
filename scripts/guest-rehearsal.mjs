@@ -6,7 +6,7 @@ import { writeFileSync } from 'node:fs';
 import { parseArgs } from 'node:util';
 import { fileURLToPath } from 'node:url';
 
-const { values: opt } = parseArgs({ options: { url: { type: 'string' }, owner: { type: 'string' }, 'roloe-home': { type: 'string' }, out: { type: 'string' }, model: { type: 'string' }, only: { type: 'string' } } });
+const { values: opt } = parseArgs({ options: { url: { type: 'string' }, owner: { type: 'string' }, 'roloe-home': { type: 'string' }, out: { type: 'string' }, model: { type: 'string' }, only: { type: 'string' }, try: { type: 'boolean' } } });
 const BIN = fileURLToPath(new URL('../bin/roloe.mjs', import.meta.url));
 const base = opt.url.replace(/\/$/, '');
 
@@ -61,6 +61,20 @@ for (const c of cases) {
   r.input = view?.guest_input ? `${view.guest_input.kind}${view.guest_input.files != null ? ` (${view.guest_input.files} files)` : ''}${view.guest_input.error ? ` error: ${view.guest_input.error}` : ''}` : '';
   r.quotes = (view?.findings || []).map((f) => `${f.credit?.locator} :: "${f.quote}" → ${f.what}`);
   r.has_change = (view?.findings || []).some((f) => f.change);
+  // Guest Try it: approve the first change on the guest's behalf, wait for the honest outcome.
+  if (opt.try && view?.findings?.some((f) => f.try)) {
+    const f = view.findings.find((x) => x.try);
+    const t1 = Date.now();
+    let st = f.try.state;
+    while (Date.now() - t1 < 240000) {
+      const fv = (await json(`/api/e/${id}?k=${encodeURIComponent(key)}`)).body.findings.find((x) => x.id === f.id);
+      st = fv.try.state;
+      if (st === 'review') await json(`/api/e/${id}/try-approve?k=${encodeURIComponent(key)}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ finding: f.id }) });
+      if (['passed', 'failed', 'no-tests', 'did-not-apply', 'declined'].includes(st)) { r.try = { state: st, passed: fv.try.passed ?? null, failed: fv.try.failed ?? null, reason: fv.try.reason || null, diff_lines: (fv.try.diff || '').split('\n').length, s: Math.round((Date.now() - t1) / 100) / 10 }; break; }
+      await new Promise((res) => setTimeout(res, 1500));
+    }
+    if (!r.try) r.try = { state: `stuck at ${st}` };
+  }
   const person = await fetch(`${base}/e/${id}?k=${encodeURIComponent(key)}`);
   r.person_page = person.status;
   const after = (await json('/api/dashboard')).body;
@@ -70,7 +84,8 @@ for (const c of cases) {
   if (a.p.exitCode === null) a.p.kill('SIGTERM');
   r.assistant_tail = a.output().trim().split('\n').slice(-2).join(' ').slice(0, 240);
   runs.push(r);
-  console.log(`${r.pass ? 'PASS' : 'FAIL'}  ${c.name.padEnd(20)} page ${r.page_ms} ms · start ${r.start_ms} ms · findings ${r.scan_to_findings_s ?? '–'} s · ${r.nothing_strong ? 'nothing strong' : `${r.findings} finding(s)`} · input ${r.input} · counted ${r.counted}`);
+  if (r.try) r.pass = r.pass && !String(r.try.state).startsWith('stuck');
+  console.log(`${r.pass ? 'PASS' : 'FAIL'}  ${c.name.padEnd(20)} page ${r.page_ms} ms · start ${r.start_ms} ms · findings ${r.scan_to_findings_s ?? '–'} s · ${r.nothing_strong ? 'nothing strong' : `${r.findings} finding(s)`} · input ${r.input} · counted ${r.counted}${r.try ? ` · try ${JSON.stringify(r.try)}` : ''}`);
 }
 if (opt.out) writeFileSync(opt.out, JSON.stringify(runs, null, 2));
 console.log(`${runs.filter((r) => r.pass).length}/${runs.length} passed`);

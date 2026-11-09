@@ -68,19 +68,19 @@ test('same person, two projects: only with the first card\'s key, and every scre
 
 test('replay: a recorded meeting shows only what had happened by each moment of its own clock', () => {
   const rec = {
-    tap: Date.parse('2026-11-09T12:31:00Z'), a: 'wes', b: 'aiden', names: { wes: 'Wes', aiden: 'Aiden' },
-    sides: { wes: { posted: true, posted_ms: 20000, top: { quote: 'q' }, more: 0, nothing_strong: false }, aiden: { posted: true, posted_ms: 9000, top: null, more: 0, nothing_strong: true } },
+    tap: Date.parse('2026-11-09T12:31:00Z'), a: 'wes', b: 'maya', names: { wes: 'Wes', maya: 'Maya' },
+    sides: { wes: { posted: true, posted_ms: 20000, top: { quote: 'q' }, more: 0, nothing_strong: false }, maya: { posted: true, posted_ms: 9000, top: null, more: 0, nothing_strong: true } },
     live: { ready_ms: 900, first_findings_ms: 9000, all_findings_ms: 20000, green_ms: 26000 },
     try: { state: 'passed', passed: 7, test_ms: 3100 },
   };
   const at5 = replayView(rec, 5000);
   assert.equal(at5.sides.wes.posted, false);
   assert.equal(at5.sides.wes.top, null);
-  assert.equal(at5.sides.aiden.posted, false);
+  assert.equal(at5.sides.maya.posted, false);
   assert.equal(at5.try, null);
   assert.equal(at5.live.green_ms, null);
   const at10 = replayView(rec, 10000);
-  assert.equal(at10.sides.aiden.nothing_strong, true);
+  assert.equal(at10.sides.maya.nothing_strong, true);
   assert.equal(at10.sides.wes.posted, false);
   const at22 = replayView(rec, 22000);
   assert.equal(at22.sides.wes.top.quote, 'q');
@@ -94,10 +94,10 @@ test('replay: a recorded meeting shows only what had happened by each moment of 
 test('replay never shows the future: post times, seals and sealed lines appear only at their moment (Gitar)', () => {
   const tap = Date.parse('2026-11-09T12:31:00Z');
   const rec = {
-    tap, a: 'wes', b: 'aiden', names: { wes: 'Wes', aiden: 'Aiden' },
+    tap, a: 'wes', b: 'maya', names: { wes: 'Wes', maya: 'Maya' },
     sides: {
       wes: { posted: true, posted_ms: 20000, top: { quote: 'q' }, more: 0, nothing_strong: false, seal: { hash: 'h1', ts: new Date(tap + 4000).toISOString(), line: 'help with retries' } },
-      aiden: { posted: true, posted_ms: 9000, top: null, more: 0, nothing_strong: true, seal: { skipped: true, ts: new Date(tap + 3000).toISOString(), line: null } },
+      maya: { posted: true, posted_ms: 9000, top: null, more: 0, nothing_strong: true, seal: { skipped: true, ts: new Date(tap + 3000).toISOString(), line: null } },
     },
     live: { ready_ms: 900, first_findings_ms: 9000, all_findings_ms: 20000, green_ms: null },
     try: null,
@@ -122,15 +122,15 @@ test('replay ends after the last recorded moment, whatever it was', async () => 
 test('replay opens a sealed line only after the other side posted, as it happens live (Gitar)', () => {
   const tap = Date.parse('2026-11-09T12:31:00Z');
   const rec = {
-    tap, a: 'wes', b: 'aiden', names: { wes: 'Wes', aiden: 'Aiden' },
+    tap, a: 'wes', b: 'maya', names: { wes: 'Wes', maya: 'Maya' },
     sides: {
       wes: { posted: true, posted_ms: 20000, top: null, more: 0, nothing_strong: true, seal: null },
-      aiden: { posted: true, posted_ms: 9000, top: null, more: 0, nothing_strong: true, seal: { hash: 'h2', ts: new Date(tap + 2000).toISOString(), line: 'aiden expected this' } },
+      maya: { posted: true, posted_ms: 9000, top: null, more: 0, nothing_strong: true, seal: { hash: 'h2', ts: new Date(tap + 2000).toISOString(), line: 'maya expected this' } },
     },
     live: { ready_ms: 900, first_findings_ms: 9000, all_findings_ms: 20000, green_ms: null }, try: null,
   };
-  assert.equal(replayView(rec, 10000).sides.aiden.seal.line, null, 'Wes has not posted yet at 0:10');
-  assert.equal(replayView(rec, 21000).sides.aiden.seal.line, 'aiden expected this');
+  assert.equal(replayView(rec, 10000).sides.maya.seal.line, null, 'Wes has not posted yet at 0:10');
+  assert.equal(replayView(rec, 21000).sides.maya.seal.line, 'maya expected this');
 });
 
 test('in the 1:40 fallback the live clock keeps running: never green from the recorded run (Gitar)', async () => {

@@ -7,13 +7,13 @@ test('meetings, findings and help outcomes are counted; time to help and to find
   const s = await startTestServer();
   try {
     const { collectForTest } = await import('../src/metrics.mjs');
-    const { aiden, wes } = await twoCards(s);
-    const { body: { id } } = await s.call('POST', '/api/tap', { to: 'wes' }, aiden);
+    const { maya, wes } = await twoCards(s);
+    const { body: { id } } = await s.call('POST', '/api/tap', { to: 'wes' }, maya);
     await s.call('POST', '/api/g/wes/start', {});
     await s.call('POST', `/api/e/${id}/findings`, { findings: [
       { cites: 'p-a00001', quote: 'mark the combined total partial', about: 'p-e00001', what: 'w', change: { edits: [{ file: 'a.js', find: 'a', replace: 'b' }] } },
       { cites: 'p-ffffff', quote: 'nope nope nope', what: 'w' },
-    ] }, aiden);
+    ] }, maya);
     await s.call('POST', `/api/e/${id}/findings`, { nothing_strong: true }, wes);
     const f = s.state().encounters[id].findings[0];
     await s.call('POST', `/api/e/${id}/try`, { finding: f.id, state: 'passed', passed: 4, failed: 0, test_ms: 900 }, wes);

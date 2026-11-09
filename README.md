@@ -46,7 +46,7 @@ flowchart LR
     co --> es
     co -.-> d0
   end
-  subgraph A["Aiden's laptop"]
+  subgraph A["Maya's laptop"]
     direction TB
     aa["Codex<br/>(own subscription)"] --> am["Roloe MCP server + CLI<br/>roloe mcp · roloe on<br/>scrub · local egress gate"] --> at["Try it sandbox<br/>docker --network none, no keys"]
   end
@@ -124,7 +124,7 @@ claude mcp add roloe -- node ~/roloe/bin/roloe.mjs mcp
 claude --dangerously-load-development-channels server:roloe   # optional: taps arrive in the open session (research preview)
 ```
 
-Then, in the session: *"Wait for Roloe taps and answer them."* (or after a tap: *"What do Aiden and I have for each other?"*).
+Then, in the session: *"Wait for Roloe taps and answer them."* (or after a tap: *"What do Maya and I have for each other?"*).
 
 **Codex**
 
