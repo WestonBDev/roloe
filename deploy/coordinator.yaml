@@ -87,6 +87,8 @@ spec:
             - { name: ROLOE_ENV_FILE, value: /nonexistent }
             # The URL phones use (QR codes point here). In git: Argo CD self-heal reverts manual edits.
             - { name: ROLOE_PUBLIC_URL, value: "https://roloe.cnh.radarhq.io" }
+            # Behind the cluster's ingress: trust its X-Forwarded-For for the guest rate limit.
+            - { name: ROLOE_TRUST_PROXY, value: "1" }
           envFrom:
             - configMapRef: { name: roloe-config }
             # kubectl -n roloe create secret generic roloe-elastic --from-literal=ELASTIC_URL=... --from-literal=ELASTIC_API_KEY=...
