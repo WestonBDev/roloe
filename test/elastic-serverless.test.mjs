@@ -5,7 +5,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { elasticStore } from '../src/store/elastic.mjs';
 
-function fakeServerless() {
+function fakeServerless(endpoints = ['.elser-2-elastic']) {
   const calls = [];
   const fetchImpl = async (url, opts) => {
     const u = new URL(url);
@@ -15,7 +15,7 @@ function fakeServerless() {
     // Real Serverless answers /_license too (Gitar): the build flavor must be checked first.
     if (u.pathname === '/_license') return reply(200, { license: { type: 'basic', status: 'active' } });
     if (u.pathname === '/' ) return reply(200, { version: { build_flavor: 'serverless' } });
-    if (u.pathname === '/_inference/_all') return reply(200, { endpoints: [{ inference_id: '.elser-2-elastic' }] });
+    if (u.pathname === '/_inference/_all') return reply(200, { endpoints: endpoints.map((inference_id) => ({ inference_id })) });
     if (opts.method === 'HEAD') return reply(404, {});
     if (opts.method === 'PUT') return reply(200, { acknowledged: true });
     if (u.pathname === '/_security/api_key') return reply(400, { error: { type: 'illegal_argument_exception' } });
@@ -67,4 +67,18 @@ test('with the elastic user\'s password, a refused key mint fails closed instead
   await store.init();
   await assert.rejects(store.createEncounterKey('e-1'));
   assert.match(store.describe().scope, /document-level/, 'scope mode unchanged: no silent downgrade');
+});
+
+test('ES_INFERENCE_ID picks a Jina embedding endpoint when the project has it, else the default', async () => {
+  const jina = '.jina-embeddings-v5-text-small';
+  const a = fakeServerless(['.elser-2-elastic', jina]);
+  const s1 = elasticStore({ esUrl: 'https://x.es.example', esApiKey: 'k', esIndex: 'roloe-t', esInference: jina, fetchImpl: a.fetchImpl });
+  await s1.init();
+  assert.equal(s1.describe().inference_id, jina);
+  assert.equal(a.calls.find((c) => c.method === 'PUT').body.mappings.properties.text_semantic.inference_id, jina);
+
+  const b = fakeServerless(['.elser-2-elastic']);   // not on this project: fall back, don't fail
+  const s2 = elasticStore({ esUrl: 'https://x.es.example', esApiKey: 'k', esIndex: 'roloe-t', esInference: jina, fetchImpl: b.fetchImpl });
+  await s2.init();
+  assert.equal(s2.describe().inference_id, '.elser-2-elastic');
 });
