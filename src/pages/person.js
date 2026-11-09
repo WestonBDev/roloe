@@ -50,6 +50,7 @@ function waitSection(v) {
       <p><a href="/g/${esc(v.them)}">Scan again</a></p></div>`;
   }
   if (v.status !== 'open' || theirs.posted) return '';
+  if (v.guest && v.instant) return '';   // the instant card carries the waiting state
   const n = Math.round((Date.now() - firstSeen) / 1000);
   return `<div class="card"><span class="tab">${esc(v.their_name)}'s assistant is reading</span>
     <h2>Keep talking. We'll show it here when there's something.</h2>
@@ -82,7 +83,25 @@ function tryBlock(f, v) {
   }
 }
 
+const WHOSE = { owner: (n) => `${n}'s own words`, commit: (n) => `${n}'s commit message`, file: (n) => `from ${n}'s code`, session: (n) => `from ${n}'s working session` };
+
+// Their words, instantly: shown before any model runs, replaced in place when findings land.
+function instantCard(v) {
+  const i = v.instant;
+  if (!i || v.findings.length || v.their_side.posted) return '';
+  const name = esc(v.their_name);
+  const status = v.their_assistant === 'online'
+    ? `<p class="state wait">${name}'s assistant is reading the rest; written findings will replace this.</p>`
+    : `<p class="state">${name}'s assistant will answer when it's back. Here's what ${name} wrote that matches.</p>`;
+  return `<article class="card deal instant"><span class="tab">${name} <span class="mono">· matched instantly</span></span>
+    <p class="quote${i.kind === 'file' ? ' code' : ''}">${esc(i.text)}</p>
+    <p class="label">${esc((WHOSE[i.whose] || WHOSE.session)(v.their_name))}</p>
+    <p class="cite">cites ${esc(i.passage_id)} · ${esc(i.locator)}</p>
+    ${status}</article>`;
+}
+
 function findingsSection(v) {
+  if (v.guest && !v.findings.length && v.instant && !v.their_side.posted) return instantCard(v);
   if (v.findings.length) return v.findings.map((f, i) => findingCard(f, v.their_name, { index: i, flip: !v.guest }) + (v.guest ? tryBlock(f, v) : '')).join('');
   if (v.their_side.posted && v.their_side.nothing_strong) {
     return `<article class="card deal"><span class="tab">${esc(v.their_name)}</span><h2>Nothing strong this time.</h2>
