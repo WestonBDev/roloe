@@ -1,6 +1,6 @@
 // Stage screen. The clock runs from the tap and stops green when Try it passes. If the live read
 // isn't in by the cutoff (1:40), the recorded run is shown, labelled, while the live clock runs.
-import { $, esc, api, hhmm, short, secs, whoseWords, isCode, replayView, renderer, poll } from '/roloe.js';
+import { $, esc, api, hhmm, short, secs, whoseWords, isCode, replayView, replayEndMs, renderer, poll } from '/roloe.js';
 
 const id = location.pathname.split('/').pop();
 const qs = new URLSearchParams(location.search);
@@ -56,7 +56,7 @@ function render() {
   const now = Date.now() + skew;
   let v, clockMs, label, recLabel = '';
   if (replayOnly) {
-    clockMs = Math.min(now - skew - replayStart, (live.live.green_ms ?? live.live.all_findings_ms ?? 0) + 3000);
+    clockMs = Math.min(now - skew - replayStart, replayEndMs(live));
     v = replayView(live, clockMs);
     label = `Recorded ${hhmm(live.tap)}`;
     recLabel = `Recorded ${hhmm(live.tap)} · replayed on its real clock`;

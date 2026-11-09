@@ -104,9 +104,12 @@ export function poll(fn, ms) {
 export function replayView(rec, elapsed) {
   const at = (ms) => ms != null && ms <= elapsed;
   const sides = {};
+  const findingsIn = at(rec.live.first_findings_ms);
   for (const [who, s] of Object.entries(rec.sides)) {
     const done = at(s.posted_ms);
-    sides[who] = { ...s, posted: done, top: done ? s.top : null, more: done ? s.more : 0, nothing_strong: done && s.nothing_strong };
+    let seal = null;
+    if (s.seal && at(Date.parse(s.seal.ts) - rec.tap)) seal = { ...s.seal, line: findingsIn ? s.seal.line : null };
+    sides[who] = { ...s, posted: done, posted_ms: done ? s.posted_ms : null, top: done ? s.top : null, more: done ? s.more : 0, nothing_strong: done && s.nothing_strong, seal };
   }
   const live = Object.fromEntries(Object.entries(rec.live).map(([k, v]) => [k, at(v) ? v : null]));
   let tryState = null;
@@ -115,4 +118,10 @@ export function replayView(rec, elapsed) {
     else if (at(rec.live.first_findings_ms)) tryState = { state: 'testing' };
   }
   return { ...rec, sides, live, try: tryState, recorded: true };
+}
+
+// When a replay is over: three seconds after the last thing that was recorded.
+export function replayEndMs(rec) {
+  const times = [...Object.values(rec.live || {}), ...Object.values(rec.sides || {}).map((x) => x.posted_ms)].filter((x) => x != null);
+  return (times.length ? Math.max(...times) : 0) + 3000;
 }
