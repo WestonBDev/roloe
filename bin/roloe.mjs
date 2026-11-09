@@ -12,7 +12,7 @@ const { values: opt, positionals: pos } = parseArgs({
   options: {
     url: { type: 'string' }, owner: { type: 'string' }, name: { type: 'string' }, line: { type: 'string' },
     project: { type: 'string' }, json: { type: 'boolean' }, ui: { type: 'boolean' }, all: { type: 'boolean' },
-    wait: { type: 'string' }, port: { type: 'string' }, undo: { type: 'boolean' }, 'same-person-as': { type: 'string' }, 'off-limits': { type: 'string', multiple: true },
+    wait: { type: 'string' }, port: { type: 'string' }, undo: { type: 'boolean' }, 'same-person-as': { type: 'string' }, 'off-limits': { type: 'string', multiple: true }, model: { type: 'string' }, 'no-try': { type: 'boolean' },
   },
 });
 
@@ -210,12 +210,24 @@ const commands = {
     }
   },
 
+  // Unattended answering for a long session (judging, a booth): your own Claude Code, headless,
+  // answers each new meeting on your card, and guest Try it runs here too.
+  async answer() {
+    const cfg = cfgFor();
+    const { runAnswerLoop } = await import('../src/answer.mjs');
+    const { roloeHome } = await import('../src/client.mjs');
+    const { toolPath } = await import('../src/tryit.mjs');
+    process.env.PATH = toolPath();
+    out(`Answering meetings on ${cfg.owner}'s card with your own Claude Code (${opt.model || 'sonnet'}), and serving guest Try it. Ctrl-C to stop.`);
+    await runAnswerLoop(cfg, { home: roloeHome(), model: opt.model || 'sonnet', log: (l) => out(`${new Date().toTimeString().slice(0, 8)} ${l}`), tryIt: !opt['no-try'] });
+  },
+
   async help() {
     out(`roloe join --url <coordinator> --owner <name> --name "<Name>" --project <dir>   (on + connect Claude Code / Codex)
 roloe on --owner <name> --name "<Name>" --project <dir> [--url <coordinator>] [--same-person-as <your first card>]
 roloe off | refresh | show [--all|--json] | private <passage_id> [--undo] | me
 roloe tap <name> | inbox | try [<meeting>] [--project <dir>] | stop [<meeting>] | canary | mcp
-roloe off-limits list | add <term>... | remove <term>... | guest-try`);
+roloe off-limits list | add <term>... | remove <term>... | guest-try | answer [--model sonnet] [--no-try]`);
   },
 };
 
