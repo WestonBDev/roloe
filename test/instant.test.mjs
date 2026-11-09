@@ -36,3 +36,14 @@ test('no instant passage when nothing matches, when they skipped, or when the ga
     assert.equal(v.instant, null, 'a passage holding a protected value is never shown');
   } finally { await s.close(); }
 });
+
+test('after Stop, the instant words are gone with everything else (Gitar)', async () => {
+  const s = await startTestServer();
+  try {
+    await twoCards(s);
+    const g = (await s.call('POST', '/api/g/wes/start', { text: 'my card watcher marks the refresh done before the push succeeds' })).body;
+    assert.ok((await waitReady(s, g.id, g.key)).instant);
+    await s.call('POST', `/api/e/${g.id}/stop?k=${g.key}`);
+    assert.equal((await s.call('GET', `/api/e/${g.id}?k=${g.key}`)).body.instant, null);
+  } finally { await s.close(); }
+});
