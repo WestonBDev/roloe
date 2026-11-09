@@ -45,7 +45,7 @@ export function looksPrivate(text, privSets) {
 }
 
 export function publicCard(o) {
-  return { owner: o.owner, name: o.name, line: o.line, sharing: o.sharing, passages: o.card?.passages || 0, updated: o.card?.updated || null };
+  return { owner: o.owner, name: o.name, line: o.line, sharing: o.sharing, passages: o.card?.passages || 0, updated: o.card?.updated || null, same_person_as: o.same_person_as || null };
 }
 
 const PAGES_DIR = new URL('./pages/', import.meta.url);
@@ -139,8 +139,18 @@ export function buildApp({ store }) {
     const owner = cleanOwnerId(body.owner);
     if (!owner || owner.length < 2) throw new HttpError(400, 'bad_owner', 'Owner must be 2–32 letters, digits or dashes');
     if (state.owners[owner]) throw new HttpError(409, 'taken', 'That card name is taken. Rotate its key with the old key, or pick another.');
+    // A second card for the same person ("my two projects") needs the first card's key as proof,
+    // so nobody can label their card as someone else's.
+    let samePerson = null;
+    if (body.same_person_as) {
+      const first = state.owners[cleanOwnerId(body.same_person_as)];
+      const proof = String(req.headers['x-roloe-same-person-key'] || '');
+      if (!first || !proof || !sameHash(first.token_hash, sha256(proof))) throw new HttpError(403, 'no_proof', 'Same-person cards need the first card\'s key');
+      samePerson = first.owner;
+    }
     const key = newKey('rk');
     state.owners[owner] = {
+      same_person_as: samePerson,
       owner, name: cleanName(body.name) || owner, line: cleanLine(body.line),
       token_hash: sha256(key), sharing: false, private: [], card: { passages: 0, totals: {}, updated: null },
       created: new Date().toISOString(),
@@ -626,7 +636,7 @@ export function stageView(enc, store) {
   const t = enc.times;
   const ms = (x) => (x ? x - t.tap : null);
   return {
-    id: enc.id, status: enc.status, guest: Boolean(enc.guest), names: enc.names, a: enc.a, b: enc.b,
+    id: enc.id, status: enc.status, guest: Boolean(enc.guest), same_person: Boolean(enc.same_person), names: enc.names, a: enc.a, b: enc.b,
     tap: t.tap, now: Date.now(),
     sides: { [enc.a]: side(enc.a), [enc.b]: side(enc.b) },
     prepared: Object.fromEntries([enc.a, enc.b].filter((o) => state.owners[o]).map((o) => [o, { passages: state.owners[o].card?.passages || 0, totals: state.owners[o].card?.totals || {}, updated: state.owners[o].card?.updated }])),
@@ -646,7 +656,7 @@ export function personView(enc, me) {
   const theirs = enc.sides[them];
   const findingsIn = enc.findings.filter((f) => f.recipient === me);
   return {
-    id: enc.id, status: enc.status, me, them, my_name: enc.names[me], their_name: enc.names[them], guest: Boolean(enc.guest),
+    id: enc.id, status: enc.status, me, them, my_name: enc.names[me], their_name: enc.names[them], guest: Boolean(enc.guest), same_person: Boolean(enc.same_person),
     created: enc.created, times: enc.times,
     seal: { mine: sealView(mine.seal, true), theirs: sealView(theirs.seal, Boolean(theirs.seal?.revealed)) },
     their_side: { posted: theirs.posted, nothing_strong: theirs.nothing_strong },

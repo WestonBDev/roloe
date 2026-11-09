@@ -1,6 +1,6 @@
 // Stage screen. The clock runs from the tap and stops green when Try it passes. If the live read
 // isn't in by the cutoff (1:40), the recorded run is shown, labelled, while the live clock runs.
-import { $, esc, api, hhmm, short, secs, whoseWords, isCode, renderer, poll } from '/roloe.js';
+import { $, esc, api, hhmm, short, secs, whoseWords, isCode, replayView, replayEndMs, stageClock, renderer, poll } from '/roloe.js';
 
 const id = location.pathname.split('/').pop();
 const qs = new URLSearchParams(location.search);
@@ -8,6 +8,9 @@ const key = qs.get('k') || '';
 const recId = qs.get('recorded');
 const recKey = qs.get('rk');
 const cutoffS = Number(qs.get('cutoff') || 100);
+const replayOnly = qs.get('replay') === '1';   // replay this meeting itself, from its tap, on its own clock
+let recStart = null;
+const replayStart = Date.now();
 if (qs.get('theme')) document.documentElement.dataset.theme = qs.get('theme');
 const drawA = renderer($('#colA')), drawB = renderer($('#colB')), drawTry = renderer($('#tryline')), drawStrip = renderer($('#strip'));
 let live = null, recorded = null, skew = 0;
@@ -51,21 +54,37 @@ function strip(v, label) {
 function render() {
   if (!live) return;
   const now = Date.now() + skew;
-  const elapsed = live.live.green_ms ?? (now - live.tap);
+  let v, label, recLabel = '', mode = 'live', replayElapsed = 0;
+  const liveElapsed = now - live.tap;
+  if (replayOnly) {
+    mode = 'replay';
+    replayElapsed = Math.min(now - skew - replayStart, replayEndMs(live));
+    v = replayView(live, replayElapsed);
+    label = `Recorded ${hhmm(live.tap)}`;
+    recLabel = `Recorded ${hhmm(live.tap)} · replayed on its real clock`;
+  } else {
+    const liveDone = live.live.all_findings_ms != null || live.live.green_ms != null;
+    const useRec = recorded && !liveDone && liveElapsed > cutoffS * 1000;
+    if (useRec) {
+      mode = 'fallback';
+      if (recStart == null) recStart = Date.now();
+      v = replayView(recorded, Date.now() - recStart);
+      label = `Recorded ${hhmm(recorded.tap)}`;
+      recLabel = `Showing the run recorded at ${hhmm(recorded.tap)} · live clock still running`;
+    } else { v = live; label = 'Read live'; }
+  }
+  const c = stageClock({ mode, liveElapsedMs: liveElapsed, replayElapsedMs: replayElapsed, live, view: v });
   const clock = $('#clock');
-  clock.textContent = fmt(elapsed);
-  clock.classList.toggle('green', live.live.green_ms != null);
-  $('#clocklabel').textContent = live.live.green_ms != null ? 'tap → working help · stopped at Try it passed' : 'tap → working help';
-  const liveDone = live.live.all_findings_ms != null || live.live.green_ms != null;
-  const useRec = recorded && !liveDone && elapsed > cutoffS * 1000;
-  const v = useRec ? recorded : live;
-  $('#reclabel').hidden = !useRec;
-  if (useRec) $('#reclabel').textContent = `Recorded ${hhmm(recorded.tap)} · live clock still running`;
-  $('#names').textContent = `${live.names[live.a]} ↔ ${live.names[live.b]}`;
+  clock.textContent = fmt(c.ms);
+  clock.classList.toggle('green', c.green);
+  $('#clocklabel').textContent = c.green ? 'tap → working help · stopped at Try it passed' : 'tap → working help';
+  $('#reclabel').hidden = !recLabel;
+  $('#reclabel').textContent = recLabel;
+  $('#names').innerHTML = `${esc(v.names[v.a])} ↔ ${esc(v.names[v.b])}${v.same_person ? ' <span class="label rec">same person, two projects</span>' : ''}`;
   drawA(column(v, v.a, v.b));
   drawB(column(v, v.b, v.a));
   drawTry(v.try ? `<span class="state ${v.try.state === 'passed' ? 'ok' : v.try.state === 'failed' ? 'bad' : 'wait'}">${esc(TRY[v.try.state] || v.try.state)}${v.try.state === 'passed' && v.try.passed != null ? ` · ${v.try.passed} tests, ${secs(v.try.test_ms)}, no network` : ''}</span>` : '');
-  drawStrip(strip(v, useRec ? `Recorded ${hhmm(recorded.tap)}` : 'Read live'));
+  drawStrip(strip(v, label));
 }
 
 async function refresh() {
