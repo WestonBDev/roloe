@@ -7,6 +7,7 @@ import { computeOverlap } from './overlap.mjs';
 import { gate } from './gate.mjs';
 import { tokens } from './store/text.mjs';
 import { record } from './metrics.mjs';
+import { syncMeeting } from './meeting-record.mjs';
 
 export const sideLink = (enc, who) => `${config.publicUrl}/e/${enc.id}?k=${enc.sides[who].key}`;
 export const stageLink = (enc) => `${config.publicUrl}/stage/${enc.id}?k=${enc.stageKey}`;
@@ -43,6 +44,7 @@ export async function createEncounter(store, a, b, { guest = null, guestPassages
   // Registered only once it's complete.
   state.encounters[id] = enc;
   record.meeting(enc.guest ? 'guest' : enc.same_person ? 'same_person' : 'pair');
+  syncMeeting(store, enc);
   save();
   return enc;
 }
