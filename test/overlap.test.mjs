@@ -89,11 +89,14 @@ test('a guest repo with a long README still puts its source files in "theirs", s
   guest.push(F('p-c00001', 'index.js', 'export default async function pRetry(input, options) { const operation = retry.operation(options); }'));
   guest.push(F('p-c00002', 'test.js', 'test("retries", async t => { t.is(await pRetry(fn), 1); });'));
   guest.push(F('p-c00003', 'docs/usage.md', 'how to use retries in your app'));
+  guest.push(F('p-c00004', 'package.json', '{ "name": "p-retry", "scripts": { "test": "ava" } }'));
+  guest.push(F('p-c00005', 'tsconfig.json', '{ "compilerOptions": { "strict": true } }'));
   await store.addToEncounter('e-r', 'guest-1', 'Guest', guest);
   const { id } = await store.createEncounterKey('e-r');
   const o = await computeOverlap(store, id, { giver: 'wes', recipient: 'guest-1', queriesFrom: 'recipient' });
   assert.ok(o.theirs.includes('p-c00001'), `index.js is offered: ${o.theirs}`);
   assert.ok(o.theirs.length <= 8);
   assert.ok(o.theirs.some((x) => x.startsWith('p-b')), 'the README still counts');
-  assert.ok(!o.theirs.includes('p-c00003') || o.theirs.indexOf('p-c00001') < o.theirs.indexOf('p-c00003'), 'source before docs');
+  assert.ok(!o.theirs.includes('p-c00004') && !o.theirs.includes('p-c00005'), 'config files never take the code slots (Gitar)');
+  assert.ok(o.theirs.indexOf('p-c00001') < o.theirs.indexOf('p-c00002'), 'code before tests');
 });
