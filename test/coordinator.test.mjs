@@ -30,3 +30,26 @@ test('health, register, rotate, and every route is traced without content', asyn
     assert.ok(!all.includes('Builds Roloe'), 'card text must never reach telemetry');
   } finally { await s.close(); }
 });
+
+test('SIGTERM right after a registration still writes the card to disk', async () => {
+  const { spawn } = await import('node:child_process');
+  const { mkdtempSync, existsSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const dataDir = mkdtempSync(join(tmpdir(), 'roloe-sig-'));
+  const port = 7600 + Math.floor(Math.random() * 300);
+  const env = { ...process.env, PORT: String(port), ROLOE_DATA_DIR: dataDir, ROLOE_ENV_FILE: '/nonexistent', ES_URL: '', ELASTIC_URL: '' };
+  const boot = () => new Promise((resolve) => {
+    const p = spawn('node', ['src/coordinator.mjs'], { env, stdio: ['ignore', 'pipe', 'inherit'] });
+    p.stdout.on('data', (d) => { if (String(d).includes('coordinator on')) resolve(p); });
+  });
+  let p = await boot();
+  const reg = await fetch(`http://127.0.0.1:${port}/api/owners`, { method: 'POST', body: JSON.stringify({ owner: 'sig' }) });
+  assert.equal(reg.status, 201);
+  p.kill('SIGTERM');
+  await new Promise((r) => p.on('exit', r));
+  assert.ok(existsSync(join(dataDir, 'state.json')), 'state written on shutdown');
+  p = await boot();
+  const card = await fetch(`http://127.0.0.1:${port}/api/cards/sig`);
+  p.kill('SIGTERM');
+  assert.equal(card.status, 200);
+});
