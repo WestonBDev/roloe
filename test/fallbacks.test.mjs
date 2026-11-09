@@ -90,3 +90,31 @@ test('replay: a recorded meeting shows only what had happened by each moment of 
   assert.equal(at30.live.green_ms, 26000);
   assert.equal(at30.recorded, true);
 });
+
+test('replay never shows the future: post times, seals and sealed lines appear only at their moment (Gitar)', () => {
+  const tap = Date.parse('2026-11-09T12:31:00Z');
+  const rec = {
+    tap, a: 'wes', b: 'aiden', names: { wes: 'Wes', aiden: 'Aiden' },
+    sides: {
+      wes: { posted: true, posted_ms: 20000, top: { quote: 'q' }, more: 0, nothing_strong: false, seal: { hash: 'h1', ts: new Date(tap + 4000).toISOString(), line: 'help with retries' } },
+      aiden: { posted: true, posted_ms: 9000, top: null, more: 0, nothing_strong: true, seal: { skipped: true, ts: new Date(tap + 3000).toISOString(), line: null } },
+    },
+    live: { ready_ms: 900, first_findings_ms: 9000, all_findings_ms: 20000, green_ms: null },
+    try: null,
+  };
+  const at2 = replayView(rec, 2000);
+  assert.equal(at2.sides.wes.posted_ms, null);
+  assert.equal(at2.sides.wes.seal, null, 'not sealed yet at 0:02');
+  const at5 = replayView(rec, 5000);
+  assert.equal(at5.sides.wes.seal.hash, 'h1');
+  assert.equal(at5.sides.wes.seal.line, null, 'line still sealed before the findings land');
+  const at21 = replayView(rec, 21000);
+  assert.equal(at21.sides.wes.seal.line, 'help with retries');
+  assert.equal(at21.sides.wes.posted_ms, 20000);
+});
+
+test('replay ends after the last recorded moment, whatever it was', async () => {
+  const { replayEndMs } = await import('../src/pages/roloe.js');
+  assert.equal(replayEndMs({ live: { ready_ms: 900, first_findings_ms: 9000, all_findings_ms: null, green_ms: null }, sides: { a: { posted_ms: 9000 }, b: { posted_ms: null } } }), 12000);
+  assert.equal(replayEndMs({ live: { ready_ms: 900, first_findings_ms: 9000, all_findings_ms: 20000, green_ms: 26000 }, sides: {} }), 29000);
+});
