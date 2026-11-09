@@ -64,7 +64,7 @@ Teal: each person's own machine and subscription. Purple: Roloe services, no mod
 | --- | --- |
 | **Elasticsearch** | The data layer and the privacy boundary. One passage index (`owner_id`, `encounter_id`, `kind`, `speaker`, `ts`, `text`, plus `semantic_text` where an inference endpoint exists). Cards are copied into each encounter with search + `_bulk?refresh=true`. Each encounter gets an API key minted with user credentials whose role descriptor carries document-level security (`query: {term: {encounter_id}}`), so the key alone can't reach anything else. Overlap uses `_msearch`, and the `rrf` retriever over lexical + semantic on licensed clusters. Stop invalidates the key and `_delete_by_query`s the copies. `node scripts/elastic-check.mjs` prints the live scope mode and a raw no-filter proof. |
 | **Dash0** | OpenTelemetry from the first route. Every request is a span; every encounter is one trace with `roloe.tap`, `roloe.overlap`, `roloe.seal`, `roloe.pull`, `roloe.findings`, one `roloe.finding.check` per finding, `roloe.try` (with `roloe.time_to_green_ms`), `roloe.probe` and `roloe.stop`. Attributes are IDs, counts, sizes and per-encounter HMACs; the HMAC key is destroyed on stop. Never text. `node scripts/otlp-check.mjs` proves export. |
-| **Radar / Argo CD** | `deploy/coordinator.yaml` (non-root, read-only root, all capabilities dropped, seccomp RuntimeDefault) and `deploy/argocd-application.yaml` (automated sync, prune, self-heal). No image registry: the pod runs stock `node:22-slim` and an init container fetches this public repo at a pinned ref. |
+| **Radar / Argo CD** | `deploy/coordinator.yaml` (non-root, read-only root, all capabilities dropped, seccomp RuntimeDefault) and `argocd/application.yaml` (automated sync, prune, self-heal). Every push to `main` builds the image to GHCR and pins it in `deploy/kustomization.yaml`; Argo CD rolls it into `team-roloe`. |
 | **Gitar** | Every feature arrives as a pull request reviewed against `.gitar/review/roloe-invariants.md`: content never in telemetry, no credentials, every read scoped, findings must cite, gate before egress, sandboxed Try it, stop really stops. |
 
 ## Setup
@@ -130,14 +130,15 @@ node bin/roloe.mjs stop                 # end it for both sides
 node bin/roloe.mjs canary               # the judge beat: a fresh secret in a file that is never shared
 ```
 
-### Deploy with Argo CD
+### Deploy on the Radar cluster (Argo CD)
+
+Every push to `main` builds the image (`.github/workflows/deploy.yaml`, to `ghcr.io/westonbdev/roloe`) and pins it in `deploy/kustomization.yaml`; Argo CD in the team cluster syncs `deploy/` to namespace `team-roloe`, served at https://roloe.cnh.radarhq.io.
 
 ```bash
-kubectl apply -n argocd -f deploy/argocd-application.yaml
-scripts/k8s-secrets.sh            # creates the roloe-elastic and roloe-otel Secrets from your .env; values never enter git
+scripts/k8s-secrets.sh    # creates the roloe-elastic and roloe-otel Secrets from your .env; values never enter git
 ```
 
-`ROLOE_PUBLIC_URL` (where QR codes point) and the pinned commit (`ROLOE_REF`) live in the Deployment's pod template in `deploy/coordinator.yaml`; change them in git and Argo CD syncs and rolls the pod. `scripts/pin-deploy.sh` pins the current `main`.
+Apply `argocd/application.yaml` once (through Radar's MCP server or kubectl) to start the sync. `ROLOE_PUBLIC_URL` (where QR codes point) lives in the Deployment in `deploy/coordinator.yaml`; change it in git and Argo CD rolls the pod. `AGENTS.md` and `.agents/skills/` tell a coding agent how to ship and debug through Radar.
 
 ### Tests
 
