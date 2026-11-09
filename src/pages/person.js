@@ -231,7 +231,7 @@ function fileInWheel(v) {
 async function refresh() {
   try {
     view = await api(`/api/e/${id}`, { key });
-    if (view.guest && fileInWheel(view)) $('#title').insertAdjacentHTML('afterend', `<p class="muted" style="font-size:14px">Filed in <a href="/r?new=${esc(id)}">your Roloe</a> on this phone.</p>`);
+    if (view.guest && String(view.me).startsWith('guest-') && fileInWheel(view))   // only the guest's phone files it $('#title').insertAdjacentHTML('afterend', `<p class="muted" style="font-size:14px">Filed in <a href="/r?new=${esc(id)}">your Roloe</a> on this phone.</p>`);
     if (view.times?.tap) firstSeen = view.times.tap;
     $('#err').hidden = true;
     await maybeReveal(view);
