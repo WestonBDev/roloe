@@ -134,6 +134,12 @@ export async function runSandboxed(dir, { onState = () => {}, onOutput = () => {
     if (!p) { onState('failed'); return { state: 'failed', reason: 'no test runner found (package.json or Python project)', output: '', passed: null, failed: null, test_ms: 0 }; }
     onState('installing');
     let output = '';
+    // The image comes down with the network on, before anything is timed or cut off.
+    if (spawnSync('docker', ['image', 'inspect', p.image], { env: dockerEnv(), stdio: 'ignore' }).status !== 0) {
+      const pull = await docker(['pull', '-q', p.image], { onData: onOutput });
+      output += pull.out;
+      if (pull.code !== 0) { onState('failed'); return { state: 'failed', reason: `could not pull ${p.image}`, output, passed: null, failed: null, test_ms: 0 }; }
+    }
     if (p.install) {
       // Dependencies from the lockfile, with network, in Linux (a macOS node_modules won't run here).
       const cacheDir = join(homedir(), '.cache', 'roloe', 'pkg-cache');
