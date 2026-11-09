@@ -34,6 +34,8 @@ async function face(entry) {
     : v?.instant ? `<p class="quote">${esc(v.instant.text)}</p><p class="muted">Matched instantly from ${esc(entry.name)}'s card.</p>`
     : v?.their_side?.nothing_strong ? `<p class="quote" style="font-size:24px">Nothing strong this time.</p>`
     : v?.status === 'closed' ? '<p class="muted">This meeting was stopped.</p>'
+    : v?.status === 'failed' ? '<p class="muted">This meeting couldn\'t be opened. Scan the card again.</p>'
+    : !v ? '<p class="muted">This meeting is no longer available.</p>'
     : '<p class="muted">Still reading. Tap to open.</p>';
   const more = v?.findings?.length > 1 ? `<p class="label">and ${v.findings.length - 1} more</p>` : '';
   return `<span class="tab">${esc(entry.name)} <span class="mono">· ${esc(hhmm(entry.at))}</span></span>${body}${more}

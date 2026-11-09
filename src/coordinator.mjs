@@ -295,7 +295,7 @@ export function buildApp({ store, guestReader = readGuestInput, guestReadTimeout
     const key = bearer(req);
     const me = Object.values(state.owners).find((o) => key && sameHash(o.token_hash, sha256(key)));
     if (!me) throw new HttpError(401, 'unauthorized', 'Card key required');
-    me.last_seen = Date.now();   // the owner's assistant is checking in (memory only)
+    if (req.headers['x-roloe-client'] === 'assistant') me.last_seen = Date.now();   // their assistant checking in, not their /me page
     const list = Object.values(state.encounters)
       .filter((e) => (e.a === me.owner || e.b === me.owner) && (query.get('all') || e.status === 'open'))
       .sort((x, y) => y.times.tap - x.times.tap)
@@ -594,6 +594,8 @@ export function buildApp({ store, guestReader = readGuestInput, guestReadTimeout
           // Stopped while the meeting was being built: undo it and keep the stop.
           await store.invalidateKey(created.keyId).catch(() => {});
           await store.deleteEncounter(created.id).catch(() => {});
+          destroyHmacKey(created.id);   // the build re-created it after Stop destroyed it
+          endEncounterTrace(created.id, { 'roloe.closed': true });
           state.encounters[enc.id] = enc;
           save();
         }
