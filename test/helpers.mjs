@@ -12,6 +12,9 @@ delete process.env.ELASTIC_URL;
 export async function startTestServer() {
   const http = await import('node:http');
   const { buildApp } = await import('../src/coordinator.mjs');
+  const { state } = await import('../src/state.mjs');
+  for (const k of Object.keys(state.owners)) delete state.owners[k];
+  for (const k of Object.keys(state.encounters)) delete state.encounters[k];
   const { memoryStore } = await import('../src/store/memory.mjs');
   const store = memoryStore();
   await store.init();
@@ -25,5 +28,5 @@ export async function startTestServer() {
     let json; try { json = JSON.parse(text); } catch { json = text; }
     return { status: res.status, body: json };
   };
-  return { base, call, close: () => new Promise((r) => server.close(r)), dataDir: process.env.ROLOE_DATA_DIR, store };
+  return { base, call, close: () => new Promise((r) => server.close(r)), dataDir: process.env.ROLOE_DATA_DIR, store, state: () => state };
 }
