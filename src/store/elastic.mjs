@@ -9,14 +9,25 @@ import { childSpan } from '../telemetry.mjs';
 
 const LICENSED = new Set(['trial', 'enterprise', 'platinum']);
 const SEMANTIC_CANDIDATES = ['.elser-2-elastic', '.elser-2-elasticsearch', '.multilingual-e5-small-elasticsearch'];
+// ELSER is English-only. A second semantic field on a multilingual Jina model (Elastic Inference
+// Service) lets someone who writes in another language find the same passages.
+const MULTILINGUAL_CANDIDATES = ['.jina-embeddings-v5-text-small', '.jina-embeddings-v3'];
+const EMBEDDED = ['text_semantic', 'text_jina'];   // never returned with a passage
+// One metadata record per meeting (see meeting-record.mjs). Strict: no other field can be written.
+const MEETING_MAPPING = { dynamic: 'strict', properties: {
+  meeting_id: { type: 'keyword' }, kind: { type: 'keyword' }, started_at: { type: 'date' }, updated_at: { type: 'date' },
+  findings_accepted: { type: 'integer' }, findings_dropped: { type: 'integer' }, nothing_strong: { type: 'boolean' },
+  time_to_findings_s: { type: 'float' }, try_state: { type: 'keyword' }, time_to_help_s: { type: 'float' }, stopped: { type: 'boolean' },
+} };
 
 export function elasticStore({ esUrl, esUser, esPassword, esApiKey, esIndex, fetchImpl = fetch }) {
   const base = esUrl.replace(/\/$/, '');
   const index = esIndex;
+  const meetingsIndex = `${esIndex.replace(/-passages$/, '')}-meetings`;   // roloe-passages -> roloe-meetings
   const basic = esApiKey ? `ApiKey ${esApiKey}` : 'Basic ' + Buffer.from(`${esUser}:${esPassword}`).toString('base64');
   const keys = new Map(); // keyId -> { encoded, encounter_id, valid }  (memory only, never persisted)
   let mintRefused = false; // serverless / API-key auth: keys with privileges can't be minted from a key
-  const info = { store: 'elasticsearch', license: 'unknown', scope: 'coordinator filter', rrf: 'coordinator', semantic: false, inference_id: null };
+  const info = { store: 'elasticsearch', license: 'unknown', scope: 'coordinator filter', rrf: 'coordinator', semantic: false, inference_id: null, multilingual: false, multilingual_inference_id: null };
 
   // Each request is a span (operation, status, duration; never the body), a child of the meeting
   // step that made it, so Dash0 shows Elastic's share of every meeting.
@@ -55,9 +66,10 @@ export function elasticStore({ esUrl, esUser, esPassword, esApiKey, esIndex, fet
   async function bulkIndex(docs) {
     if (!docs.length) return 0;
     const lines = [];
+    const stamp = new Date().toISOString();   // when this copy was made: what expiry reads
     for (const d of docs) {
       lines.push(JSON.stringify({ index: { _index: index, _id: `${d.encounter_id}:${d.owner_id}:${d.passage_id}` } }));
-      lines.push(JSON.stringify(d));
+      lines.push(JSON.stringify({ ...d, shared_at: stamp }));
     }
     const { json } = await es('POST', '/_bulk?refresh=true', lines.join('\n') + '\n', { ndjson: true });
     if (json.errors) {
@@ -90,22 +102,25 @@ export function elasticStore({ esUrl, esUser, esPassword, esApiKey, esIndex, fet
       }
       info.scope = licensed ? 'document-level security key' : 'coordinator filter (Basic license refuses DLS)';
       info.rrf = licensed ? 'elasticsearch' : 'coordinator';
+      const wantSemantic = licensed && process.env.ROLOE_SEMANTIC !== 'off';
+      const wantMultilingual = wantSemantic && process.env.ROLOE_MULTILINGUAL !== 'off';
+      const inferenceIds = async () => ((await es('GET', '/_inference/_all', undefined, { allow: [400, 403, 404] })).json.endpoints || []).map((e) => e.inference_id);
       const exists = await es('HEAD', `/${index}`, undefined, { allow: [404] });
+      const ids = exists.status !== 404 && wantMultilingual ? await inferenceIds() : [];
       if (exists.status === 404) {
-        if (licensed && process.env.ROLOE_SEMANTIC !== 'off') {
-          const inf = await es('GET', '/_inference/_all', undefined, { allow: [400, 403, 404] });
-          const ids = (inf.json.endpoints || []).map((e) => e.inference_id);
-          info.inference_id = SEMANTIC_CANDIDATES.find((c) => ids.includes(c)) || null;
-        }
+        const ids = wantSemantic ? await inferenceIds() : [];
+        info.inference_id = SEMANTIC_CANDIDATES.find((c) => ids.includes(c)) || null;
+        const jina = info.inference_id && wantMultilingual ? MULTILINGUAL_CANDIDATES.find((c) => ids.includes(c)) || null : null;
         const props = {
           passage_id: { type: 'keyword' }, owner_id: { type: 'keyword' }, owner_name: { type: 'keyword' },
           encounter_id: { type: 'keyword' }, kind: { type: 'keyword' }, speaker: { type: 'keyword' },
           source: { type: 'keyword' }, locator: { type: 'keyword' }, via: { type: 'keyword' },
-          ts: { type: 'date' }, text: { type: 'text' },
+          ts: { type: 'date' }, shared_at: { type: 'date' }, text: { type: 'text' },
         };
         if (info.inference_id) {
-          props.text = { type: 'text', copy_to: 'text_semantic' };
+          props.text = { type: 'text', copy_to: jina ? EMBEDDED : ['text_semantic'] };
           props.text_semantic = { type: 'semantic_text', inference_id: info.inference_id };
+          if (jina) props.text_jina = { type: 'semantic_text', inference_id: jina };
         }
         const body = { mappings: { properties: props } };
         if (info.license !== 'serverless') body.settings = { number_of_shards: 1, number_of_replicas: 0, refresh_interval: '1s' };
@@ -113,11 +128,31 @@ export function elasticStore({ esUrl, esUser, esPassword, esApiKey, esIndex, fet
         if (r.status === 400 && r.json?.error?.type !== 'resource_already_exists_exception') {
           const e = new Error(`index create failed: ${r.json?.error?.type}: ${String(r.json?.error?.reason || "").slice(0, 200)}`); e.code = r.json?.error?.type || 'index_create_failed'; throw e;
         }
+        info.multilingual_inference_id = jina;
       } else {
         const m = await es('GET', `/${index}/_mapping`);
-        const sem = Object.values(m.json)[0]?.mappings?.properties?.text_semantic;
-        info.inference_id = sem?.inference_id || null;
+        const have = Object.values(m.json)[0]?.mappings?.properties || {};
+        info.inference_id = have.text_semantic?.inference_id || null;
+        info.multilingual_inference_id = have.text_jina?.inference_id || null;
+        // Upgrade in place: semantic_text fields and copy_to can be added to a live index, so the
+        // next copy made for a meeting is embedded both ways. No reindex. If Elasticsearch
+        // refuses, search stays keywords + ELSER.
+        const add = {};
+        if (!have.shared_at) add.shared_at = { type: 'date' };
+        if (info.inference_id && !have.text_jina && wantMultilingual) {
+          const jina = MULTILINGUAL_CANDIDATES.find((c) => ids.includes(c)) || null;
+          if (jina) { add.text = { type: 'text', copy_to: EMBEDDED }; add.text_jina = { type: 'semantic_text', inference_id: jina }; }
+        }
+        if (Object.keys(add).length) {
+          const r = await es('PUT', `/${index}/_mapping`, { properties: add }, { allow: [400] });
+          if (r.status === 200 && add.text_jina) info.multilingual_inference_id = add.text_jina.inference_id;
+        }
       }
+      if (process.env.ROLOE_MULTILINGUAL === 'off') info.multilingual_inference_id = null;
+      info.multilingual = Boolean(info.multilingual_inference_id);
+      const mi = await es('HEAD', `/${meetingsIndex}`, undefined, { allow: [404] });
+      if (mi.status === 404) await es('PUT', `/${meetingsIndex}`, { mappings: MEETING_MAPPING }, { allow: [400] });
+      else await es('PUT', `/${meetingsIndex}/_mapping`, { dynamic: 'strict' }, { allow: [400] });   // created by the setup script: keep it strict
       info.semantic = Boolean(info.inference_id);
       // Probe once: can this credential mint a scoped key? Then describe() is honest from startup.
       if (info.scope.startsWith('document-level') && esApiKey) {   // password auth fails closed at mint time instead
@@ -202,7 +237,7 @@ export function elasticStore({ esUrl, esUser, esPassword, esApiKey, esIndex, fet
       const k = keyAuth(keyId);
       const uniq = [...new Set(ids)].slice(0, 200);
       if (!uniq.length) return [];
-      const hits = await searchAs(keyId, { size: uniq.length * 2, _source: { excludes: ['text_semantic'] }, query: scoped(k.encounter_id, [], [{ terms: { passage_id: uniq } }]) });
+      const hits = await searchAs(keyId, { size: uniq.length * 2, _source: { excludes: EMBEDDED }, query: scoped(k.encounter_id, [], [{ terms: { passage_id: uniq } }]) });
       return hits.map(strip);
     },
     async list(keyId, owner) {
@@ -238,16 +273,25 @@ export function elasticStore({ esUrl, esUser, esPassword, esApiKey, esIndex, fet
         const lexical = { match: { text: { query: String(q).slice(0, 2000) } } };
         if (hybrid && info.semantic && info.rrf === 'elasticsearch') {
           const f = [{ term: { encounter_id: key.encounter_id } }, ...filter];
-          lines.push(JSON.stringify({ size: k, _source: { excludes: ['text_semantic'] }, retriever: { rrf: { rank_window_size: 20, rank_constant: 60, retrievers: [
+          lines.push(JSON.stringify({ size: k, _source: { excludes: EMBEDDED }, retriever: { rrf: { rank_window_size: 20, rank_constant: 60, retrievers: [
             { standard: { query: { bool: { must: [lexical], filter: f } } } },
             { standard: { query: { bool: { must: [{ semantic: { field: 'text_semantic', query: String(q).slice(0, 2000) } }], filter: f } } } },
+            ...(info.multilingual ? [{ standard: { query: { bool: { must: [{ semantic: { field: 'text_jina', query: String(q).slice(0, 2000) } }], filter: f } } } }] : []),
           ] } } }));
         } else {
-          lines.push(JSON.stringify({ size: k, _source: { excludes: ['text_semantic'] }, query: scoped(key.encounter_id, [lexical], filter) }));
+          lines.push(JSON.stringify({ size: k, _source: { excludes: EMBEDDED }, query: scoped(key.encounter_id, [lexical], filter) }));
         }
       }
       const { json } = await es('POST', `/${index}/_msearch`, lines.join('\n') + '\n', { auth: key.encoded ? `ApiKey ${key.encoded}` : basic, ndjson: true });
       return json.responses.map((r) => (r.hits?.hits || []).map(docOf));
+    },
+    // Metadata only, in its own strict index. An upsert, so each step of a meeting adds to one record.
+    async recordMeeting(doc) {
+      await es('POST', `/${meetingsIndex}/_update/${encodeURIComponent(doc.meeting_id)}`, { doc, doc_as_upsert: true });
+    },
+    async listMeetings() {
+      const { json } = await es('POST', `/${meetingsIndex}/_search`, { size: 1000, sort: [{ started_at: 'desc' }] }, { allow: [404] });
+      return (json.hits?.hits || []).map((h) => h._source);
     },
     async deleteEncounter(enc) {
       const { json } = await es('POST', `/${index}/_delete_by_query?refresh=true&conflicts=proceed`, { query: { term: { encounter_id: enc } } }, { allow: [404] });
@@ -261,6 +305,6 @@ export function elasticStore({ esUrl, esUser, esPassword, esApiKey, esIndex, fet
       const r = await es('POST', `/${index}/_count`, { query: { term: { encounter_id: k.encounter_id } } }, { auth: `ApiKey ${k.encoded}`, allow: [401, 403] });
       return r.status === 200 ? r.json.count : 0;
     },
-    async dropIndex() { if (index.startsWith('roloe-test-')) await es('DELETE', `/${index}`, undefined, { allow: [404] }); },
+    async dropIndex() { if (index.startsWith('roloe-test-')) { await es('DELETE', `/${index}`, undefined, { allow: [404] }); await es('DELETE', `/${meetingsIndex}`, undefined, { allow: [404] }); } },
   };
 }

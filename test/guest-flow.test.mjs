@@ -166,6 +166,8 @@ test('Stop while a guest meeting is still opening really stops it: it never open
     const v = await (await fetch(`${base}/api/e/${g.id}?k=${g.key}`)).json();
     assert.equal(v.status, 'closed');
     assert.equal((await s.call('GET', '/api/me/encounters', null, wes)).body.encounters.length, 0);
+    const meeting = (await s.store.listMeetings()).find((m) => m.meeting_id === g.id);
+    assert.equal(meeting.stopped, true, 'the stopped meeting still gets a closed meeting record');
     assert.equal(await s.store.deleteEncounter(g.id), 0, 'no copies were made');
     srv.close();
   } finally { await s.close(); }

@@ -1,0 +1,21 @@
+{
+  "id": "roloe.help_outcomes",
+  "type": "esql",
+  "description": "Help outcomes for the organizer. Reads meeting metadata only (index roloe-meetings: no passages, no names, no content). Returns one row per Try it state (passed, failed, declined, did-not-apply) for the last `hours_back` hours: meetings, share of all meetings, how many have a time to help, how many of those were within the 120-second SLO, that share, the median seconds to help, and the overall share within the SLO.",
+  "tags": [
+    "roloe",
+    "organizer",
+    "metadata-only"
+  ],
+  "configuration": {
+    "query": "FROM roloe-meetings | WHERE DATE_DIFF(\"minute\", started_at, NOW()) <= ?hours_back * 60 | STATS meetings = COUNT(*), timed = COUNT(time_to_help_s), within_slo = COUNT(*) WHERE time_to_help_s <= 120, median_time_to_help_s = MEDIAN(time_to_help_s) BY try_state | INLINE STATS all_meetings = SUM(meetings), all_timed = SUM(timed), all_within_slo = SUM(within_slo) | EVAL share_of_meetings = ROUND(meetings::double / all_meetings, 3), share_within_slo = CASE(timed > 0, ROUND(within_slo::double / timed, 3), null), overall_share_within_slo = CASE(all_timed > 0, ROUND(all_within_slo::double / all_timed, 3), null) | KEEP try_state, meetings, share_of_meetings, timed, within_slo, share_within_slo, median_time_to_help_s, overall_share_within_slo | SORT meetings DESC",
+    "params": {
+      "hours_back": {
+        "type": "integer",
+        "description": "How many hours back from now to include. Defaults to 24 (today).",
+        "optional": true,
+        "defaultValue": 24
+      }
+    }
+  }
+}
