@@ -15,6 +15,7 @@
     "test": "node --test --test-concurrency=1 --test-timeout=60000 --test-force-exit test/*.test.mjs"
   },
   "dependencies": {
+    "@dash0/sdk-web": "0.28.2",
     "@modelcontextprotocol/sdk": "1.32.2",
     "@opentelemetry/api": "1.10.0",
     "@opentelemetry/exporter-logs-otlp-http": "0.300.0",

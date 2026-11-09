@@ -11,7 +11,8 @@ What each sponsor tool does in Roloe, with links and numbers. Only what has actu
   - **Bug:** two posts from one side at once bypassed the three-findings limit ([#5](https://github.com/WestonBDev/roloe/pull/5)).
   - **Security:** guest taps weren't rate-limited, and a forged `X-Forwarded-For` could dodge the limit ([#8](https://github.com/WestonBDev/roloe/pull/8)).
   - **Deploy:** Argo CD self-heal would revert a manual ConfigMap edit; `/data` was ephemeral; the init container ran an unpinned branch ([#9](https://github.com/WestonBDev/roloe/pull/9)).
-- Open: `.gitar/rules/` workflow rules; a genuine red CI run fixed through Gitar's auto-apply.
+- Repository rules: `.gitar/rules/` holds one rule per privacy invariant ([#19](https://github.com/WestonBDev/roloe/pull/19)). Custom rules are a Gitar Pro feature, so on our tier they may show as not evaluated.
+- **A real CI failure, diagnosed and fixed by Gitar** ([#19](https://github.com/WestonBDev/roloe/pull/19)): a new CI step scans every tracked file for secret-shaped strings with Roloe's own scrubber patterns. It went red on four real literals in test fixtures (a JWT and private-key armour). Asked with `Gitar fix CI`, Gitar diagnosed it (change-related, high confidence) and pushed the fix itself: commit `6ec29ef` "test: assemble secret fixtures at runtime", authored by Gitar. Its review of that PR then caught that the scan missed env-style `KEY=value` secrets; that rule was added test-first.
 
 ## Elasticsearch: the data layer and the privacy boundary
 
