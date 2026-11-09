@@ -70,3 +70,22 @@ test('a passage kept private stays off the card when its file shifts by a line (
     assert.deepEqual(ids, ['p-222222']);
   } finally { await s.close(); }
 });
+
+test('marking a passage private twice keeps its protection; shared boilerplate lines never hide public passages (Gitar)', async () => {
+  const s = await startTestServer();
+  try {
+    const { body: { key } } = await s.call('POST', '/api/owners', { owner: 'twice' });
+    const auth = { authorization: `Bearer ${key}` };
+    await s.call('POST', '/api/cards/twice/switch', { on: true }, auth);
+    const secret = Array.from({ length: 6 }, (_, i) => `const hiddenPlan${i} = "private roadmap item ${i}";`);
+    const boiler = ['import { test } from "node:test";', '} catch (err) {', '  return { ok: false, err };'];
+    await s.call('PUT', '/api/cards/twice', { passages: [P('p-111111', [...boiler, ...secret].join('\n'), { kind: 'file', speaker: '' })] }, auth);
+    await s.call('POST', '/api/cards/twice/private', { passage_id: 'p-111111' }, auth);
+    await s.call('POST', '/api/cards/twice/private', { passage_id: 'p-111111' }, auth); // again
+    const shifted = ['// header', ...secret.slice(0, 5)].join('\n');
+    const publicOne = [boiler[0], boiler[1], 'console.log("public note about retries")'].join('\n');
+    await s.call('PUT', '/api/cards/twice', { passages: [P('p-333333', shifted, { kind: 'file', speaker: '' }), P('p-444444', publicOne, { kind: 'file', speaker: '' })] }, auth);
+    const ids = (await s.call('GET', '/api/cards/twice/passages', null, auth)).body.passages.map((p) => p.passage_id);
+    assert.deepEqual(ids, ['p-444444']);
+  } finally { await s.close(); }
+});
