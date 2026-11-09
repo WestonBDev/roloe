@@ -6,6 +6,7 @@ import { config } from './env.mjs';
 import { router, send, readJson, bearer, HttpError } from './http.mjs';
 import { state, load, save, saveNow, sha256, newKey, sameHash, cleanOwnerId, cleanName, cleanLine } from './state.mjs';
 import { otlpOn, traceFile, flush } from './telemetry.mjs';
+import { record, flushMetrics } from './metrics.mjs';
 const traceFileRef = traceFile;
 import { scrub } from './scrub.mjs';
 import { openStore } from './store/index.mjs';
@@ -379,7 +380,10 @@ export function buildApp({ store }) {
       side.posted_at = Date.now();
       side.nothing_strong = accepted === 0;
       const now = Date.now();
-      if (!enc.times.first_findings) enc.times.first_findings = now;
+      record.findings('accepted', accepted);
+      record.findings('dropped', dropped.length);
+      if (accepted === 0) record.findings('nothing_strong', 1);
+      if (!enc.times.first_findings) { enc.times.first_findings = now; record.timeToFindings(now - enc.times.tap); }
       const posters = [enc.a, enc.b].filter((w) => !w.startsWith('guest-'));
       if (posters.every((w) => enc.sides[w].posted)) enc.times.all_findings = now;
       span.setAttributes({ 'roloe.findings.submitted': submitted.length, 'roloe.findings.accepted': accepted, 'roloe.findings.dropped': submitted.length - accepted, 'roloe.findings.nothing_strong': accepted === 0, 'roloe.ms_since_tap': now - enc.times.tap });
@@ -416,9 +420,11 @@ export function buildApp({ store }) {
         ...(b.state === 'passed' && !enc.times.green ? { 'roloe.time_to_green_ms': now - enc.times.tap } : {}),
       }, async () => {});
       enc.tries.push({ ...enc.tryStatus });
+      record.help(b.state);
     }
     if (b.state === 'passed' && !enc.times.green) {
       enc.times.green = now;
+      record.timeToHelp(now - enc.times.tap);
       enc.thanks.push({ to: f.giver, from: me, finding: f.id, tests_passed: num(b.passed), ms_to_green: now - enc.times.tap, at: new Date(now).toISOString() });
     }
     save();
@@ -680,7 +686,7 @@ export async function start(port = config.port) {
     console.log(`[roloe] traces → ${traceFile}${otlpOn ? ' and OTLP' : ' (OTLP off: set OTEL_EXPORTER_OTLP_ENDPOINT)'}`);
   });
   // Write any pending state before exiting: a key already sent to a caller must survive.
-  const stop = async () => { try { saveNow(); } catch { /* disk gone: nothing more to do */ } await flush().catch(() => {}); process.exit(0); };
+  const stop = async () => { try { saveNow(); } catch { /* disk gone: nothing more to do */ } await flush().catch(() => {}); await flushMetrics(); process.exit(0); };
   process.on('SIGTERM', stop);
   process.on('SIGINT', stop);
   return server;

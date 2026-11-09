@@ -18,3 +18,16 @@ const result = await new Promise((resolve) => {
 });
 console.log(result.code === 0 ? 'Accepted by the OTLP endpoint.' : `Rejected: ${result.error?.message || result.code}`);
 await exporter.shutdown();
+
+// Metrics too: collect one batch and send it to /v1/metrics.
+const { MeterProvider, MetricReader } = await import('@opentelemetry/sdk-metrics');
+const { OTLPMetricExporter } = await import('@opentelemetry/exporter-metrics-otlp-http');
+class Manual extends MetricReader { async onForceFlush() {} async onShutdown() {} }
+const reader = new Manual();
+const mp = new MeterProvider({ resource: resourceFromAttributes({ 'service.name': 'roloe-otlp-check' }), readers: [reader] });
+mp.getMeter('check').createCounter('roloe.otlp_check').add(1);
+const { resourceMetrics } = await reader.collect();
+const mexp = new OTLPMetricExporter({ url: `${base.replace(/\/v1\/traces$/, '')}/v1/metrics`, headers });
+const mres = await new Promise((r) => mexp.export(resourceMetrics, r));
+console.log(mres.code === 0 ? 'Metrics accepted by the OTLP endpoint.' : `Metrics rejected: ${mres.error?.message || mres.code}`);
+await mexp.shutdown();
