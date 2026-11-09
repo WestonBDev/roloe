@@ -712,6 +712,9 @@ export function buildApp({ store, guestReader = readGuestInput, guestReadTimeout
       for (const f of enc.findings) {
         // A claim left by a runner that died goes back in the queue after two minutes.
         if (f.try?.state === 'preparing' && Date.now() - (f.try.at || 0) > 120000) f.try = { ...f.try, state: 'diff-pending' };
+        // A run whose runner went quiet (install is capped at 3 min, tests at 2) goes back to approved,
+        // so another runner runs exactly the diff the guest approved, instead of "installing" forever.
+        if (['installing', 'testing'].includes(f.try?.state) && Date.now() - (f.try.at || 0) > 6 * 60e3) f.try = { ...f.try, state: 'approved', at: Date.now() };
         if (f.giver !== me.owner || !['diff-pending', 'preparing', 'review', 'approved', 'installing', 'testing'].includes(f.try?.state)) continue;
         jobs.push({ encounter_id: enc.id, finding: f.id, repo: enc.guest.repo, ref: enc.guest.ref || 'HEAD', path: enc.guest.path || '', edits: f.change.edits, state: f.try.state,
           ...(f.try.state === 'approved' ? { approved_diff: f.try.diff ?? '' } : {}) });
