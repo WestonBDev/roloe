@@ -8,6 +8,7 @@ import { state, load, save, saveNow, sha256, newKey, sameHash, cleanOwnerId, cle
 import { otlpOn, traceFile, flush } from './telemetry.mjs';
 import { scrub } from './scrub.mjs';
 import { openStore } from './store/index.mjs';
+import { createEncounter, inboxEntry, stageLink, sideLink } from './encounter.mjs';
 
 const KINDS = new Set(['session', 'file', 'commit', 'link']);
 const SPEAKERS = new Set(['owner', 'assistant', 'pasted', '']);
@@ -155,6 +156,34 @@ export function buildApp({ store }) {
     }
     save();
     send(res, 200, { owner: o.owner, private: o.private });
+  });
+
+  // ---------- The tap ----------
+  r.add('POST', '/api/tap', async ({ req, res, span }) => {
+    const body = await readJson(req);
+    const toId = cleanOwnerId(body.to);
+    const key = bearer(req);
+    const me = Object.values(state.owners).find((o) => key && sameHash(o.token_hash, sha256(key)));
+    if (!me) throw new HttpError(401, 'unauthorized', 'Card key required');
+    const them = state.owners[toId];
+    if (!them) throw new HttpError(404, 'no_card', 'No card by that name');
+    if (them.owner === me.owner) throw new HttpError(400, 'self', 'You can\'t tap your own card');
+    if (!them.sharing || !me.sharing) throw new HttpError(409, 'switch_off', `${!me.sharing ? 'Your' : them.name + "'s"} card isn't sharing right now`);
+    const enc = await createEncounter(store, me, them);
+    span.setAttribute('roloe.encounter_id', enc.id);
+    send(res, 201, { id: enc.id, with: them.owner, link: sideLink(enc, me.owner), stage: stageLink(enc), ready_ms: enc.times.ready - enc.times.tap });
+  });
+
+  r.add('GET', '/api/me/encounters', async ({ req, res, query }) => {
+    const key = bearer(req);
+    const me = Object.values(state.owners).find((o) => key && sameHash(o.token_hash, sha256(key)));
+    if (!me) throw new HttpError(401, 'unauthorized', 'Card key required');
+    const list = Object.values(state.encounters)
+      .filter((e) => (e.a === me.owner || e.b === me.owner) && (query.get('all') || e.status === 'open'))
+      .sort((x, y) => y.times.tap - x.times.tap)
+      .slice(0, 20)
+      .map((e) => inboxEntry(e, me.owner));
+    send(res, 200, { owner: me.owner, encounters: list });
   });
 
   return r;
