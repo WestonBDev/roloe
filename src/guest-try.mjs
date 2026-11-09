@@ -25,7 +25,8 @@ export async function gitClone(job, dest) {
   args.push(job.repo, dest);
   const env = { PATH: process.env.PATH, HOME: homedir(), GIT_TERMINAL_PROMPT: '0' };
   await run('git', args, { env, timeout: 60000 });
-  if (job.path) await run('git', ['-C', dest, 'sparse-checkout', 'set', job.path], { env, timeout: 60000 });
+  // Non-cone patterns work for a folder or a single file; the root package files come too, so tests can run.
+  if (job.path) await run('git', ['-C', dest, 'sparse-checkout', 'set', '--no-cone', `/${job.path}`, '/package.json', '/package-lock.json', '/pyproject.toml', '/requirements.txt'], { env, timeout: 60000 });
 }
 
 async function prepare(job, clone) {

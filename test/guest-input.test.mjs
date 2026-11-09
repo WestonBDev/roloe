@@ -23,7 +23,7 @@ function fakeFetch(routes) {
 test('parses repo, subfolder and file links on GitHub, and other https pages', () => {
   assert.deepEqual(parseGuestLink('https://github.com/acme/widgets'), { kind: 'github', owner: 'acme', repo: 'widgets', ref: 'HEAD', path: '' });
   assert.deepEqual(parseGuestLink('https://github.com/acme/mono/tree/main/packages/api'), { kind: 'github', owner: 'acme', repo: 'mono', ref: 'main', path: 'packages/api' });
-  assert.deepEqual(parseGuestLink('https://github.com/acme/mono/blob/dev/README.md'), { kind: 'github', owner: 'acme', repo: 'mono', ref: 'dev', path: 'README.md' });
+  assert.deepEqual(parseGuestLink('https://github.com/acme/mono/blob/dev/README.md'), { kind: 'github', owner: 'acme', repo: 'mono', ref: 'dev', path: 'README.md', file: true });
   assert.equal(parseGuestLink('https://example.com/post').kind, 'page');
   assert.equal(parseGuestLink('http://example.com/post'), null, 'https only');
   assert.equal(parseGuestLink('javascript:alert(1)'), null);
