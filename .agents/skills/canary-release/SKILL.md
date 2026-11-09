@@ -22,7 +22,7 @@ The split is by pod count (1 in 4 pods), not by request weight: the URL goes str
 
 Skip this if `deploy/kustomization.yaml` already lists `rollout.yaml`.
 
-1. Copy `examples/canary/rollout.yaml` to `deploy/rollout.yaml`. In `deploy/kustomization.yaml`, replace `deployment.yaml` with `rollout.yaml` under `resources:`, and delete `deploy/deployment.yaml`.
+1. Copy `examples/canary/rollout.yaml` to `deploy/rollout.yaml`. In this repo the Deployment lives in `deploy/coordinator.yaml`: add `rollout.yaml` under `resources:` in `deploy/kustomization.yaml` and remove the Deployment `app` from `deploy/coordinator.yaml` (keep its ConfigMap, PVC and Service).
 2. If the HPA is on, point its `scaleTargetRef` at `apiVersion: argoproj.io/v1alpha1`, `kind: Rollout`, and delete `replicas:` from the Rollout.
 3. Ship it with the `ship` skill, using `kind: rollout` in `wait_for`. The first Rollout goes straight to 100%: there's no older version to protect.
 

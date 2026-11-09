@@ -15,7 +15,7 @@ The team name is in `deploy/kustomization.yaml` (`namespace: team-<team>`). Rada
 
 Skip this if `get_resource` (kind `Application`, group `argoproj.io`, name `app`) finds the Application.
 
-1. If `deploy/kustomization.yaml` still says `team-roloe`, run `./scripts/setup.sh <team>` first. Ask for the team name if you don't know it.
+1. This repo is already set up for team `roloe` (namespace `team-roloe`); there is no setup.sh to run.
 2. Push (step 1 below) and wait for the first build (step 2).
 3. The GHCR image must be public, and usually already is. Don't check it up front: new pods that pull it and run (step 4) prove it.
 4. Apply `argocd/application.yaml` with `apply_resource` (with `cluster`). The starter app is already running; Argo CD takes it over. Keep the app’s reconciled manifests in GitOps. Direct Secrets and temporary Jobs follow the [agent workflows](../../../examples/agent-workflows/README.md) recipe.
