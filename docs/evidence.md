@@ -1,0 +1,59 @@
+# Evidence
+
+What each sponsor tool does in Roloe, with links and numbers. Only what has actually happened is listed; what's still open is marked open.
+
+## Gitar: every change reviewed
+
+- PRs [#1](https://github.com/WestonBDev/roloe/pull/1)–[#12](https://github.com/WestonBDev/roloe/pull/12) were reviewed by Gitar against `.gitar/review/roloe-invariants.md` and merged in order after approval and green CI.
+- Gitar's findings were fixed as red-then-green test commits, each named "(Gitar)" in `git log`. Examples:
+  - **Security:** a private key pasted across a chunk boundary could leak its second half (scrub now runs before chunking) ([#2](https://github.com/WestonBDev/roloe/pull/2)).
+  - **Security:** Try it could write through a symlink into the real project; containers ran as root and outlived their timeout ([#7](https://github.com/WestonBDev/roloe/pull/7)).
+  - **Bug:** two posts from one side at once bypassed the three-findings limit ([#5](https://github.com/WestonBDev/roloe/pull/5)).
+  - **Security:** guest taps weren't rate-limited, and a forged `X-Forwarded-For` could dodge the limit ([#8](https://github.com/WestonBDev/roloe/pull/8)).
+  - **Deploy:** Argo CD self-heal would revert a manual ConfigMap edit; `/data` was ephemeral; the init container ran an unpinned branch ([#9](https://github.com/WestonBDev/roloe/pull/9)).
+- Open: `.gitar/rules/` workflow rules; a genuine red CI run fixed through Gitar's auto-apply.
+
+## Elasticsearch: the data layer and the privacy boundary
+
+- Elastic Cloud Serverless 9.7 project. The RRF retriever (BM25 + `semantic_text` on `.elser-2-elastic`) runs overlap retrieval at every meeting.
+- Scoped keys: Serverless refuses to derive a key with privileges from an API key. Its own words: *"creating derived api keys requires an explicit role descriptor that is empty (has no privileges)"*. So scope is the coordinator's `encounter_id` filter on every read, and the coordinator says so from startup. On a licensed cluster with user credentials, each meeting gets a document-level-security key (`scripts/elastic-check.mjs` prints the live mode and a raw no-filter proof).
+- Stop sends the old key back to Elasticsearch and records its answer (0 documents).
+- Open: encounter state and counts in Elastic (needed for the HPA); Agent Builder tools and Workflows (availability on Serverless to be checked); a "why this passage" view.
+
+## Dash0: traces and metrics from the first route
+
+- Every request is a span; every meeting is one trace (`roloe.tap`, `roloe.overlap`, `roloe.guest_read`, `roloe.pull`, `roloe.findings`, `roloe.finding.check`, `roloe.try`, `roloe.probe`, `roloe.stop`). Attributes are IDs, counts and per-meeting HMACs, never text.
+- Metrics: `roloe.meetings`, `roloe.findings`, `roloe.help`, `roloe.time_to_help` (seconds; 120 s bucket for the SLO), `roloe.time_to_findings`. `scripts/otlp-check.mjs`: Dash0 accepted both a trace and a metric batch.
+- Found with traces: the guest page's "Opening…" took 3–14 s; the `roloe.tap` span showed copying 305 passages (with ELSER inference) took 3.2–4.4 s. Fix: the guest page now answers at once and the meeting is prepared behind it (2–16 ms).
+- Open: logs, browser RUM, the SLO and dashboard set up in Dash0, an Agent0 diagnosis.
+
+## Radar / Argo CD
+
+- Manifests ready: `deploy/coordinator.yaml` (non-root, read-only root, capabilities dropped, PVC for `/data`, pinned commit, Ingress for `roloe.cnh.radarhq.io`) and `deploy/argocd-application.yaml`.
+- Open (needs the join code): the deploy, an Argo Rollouts canary gated on Dash0, the HPA, Radar's audit and AI SRE.
+
+## Guest-path rehearsals
+
+
+
+## Guest path readiness
+
+Zero-install guest meetings against Elastic Cloud Serverless, with Weston's card (from today's Roloe work) answered by his own Claude Code (Sonnet, headless, his login on his Mac). Each run: cold page load, the guest submits, Weston's assistant was already waiting. Repos used are public and not ours. `node scripts/guest-rehearsal.mjs` reproduces it.
+
+| Run set | Public repo (p-retry) | Monorepo folder (next.js `packages/next/src/lib`) | Docs page (nodejs.org) | One sentence | Skip |
+| --- | --- | --- | --- | --- | --- |
+| 1 | pass · 14.5 s · nothing strong | pass · 18.7 s · nothing strong | pass · 15.9 s · nothing strong | pass · 14.3 s · 1 finding | pass · 5.9 s · nothing strong |
+| 5 | pass · 20.1 s · 2 findings | pass · 29.1 s · 2 findings | pass · 19.1 s · 2 findings | pass · 14.1 s · 3 findings | pass · 16.1 s · 1 finding |
+| 6 | pass · 20.1 s · 1 finding | pass · 24.1 s · 1 finding | pass · 19.7 s · 3 findings | pass · 14.0 s · 3 findings | pass · 9.0 s · 1 finding |
+
+Times are from the guest pressing Send to findings on their page. The page opens in 2–16 ms; the meeting is prepared behind it.
+
+What the runs found and fixed (each test-first):
+- Opening took 3–14 s (the trace showed the card copy with ELSER inference). Now the guest's page answers at once.
+- Findings were mostly "nothing strong" because 40 of Weston's passages were searched against one guest sentence. Now the guest's material is the query over Weston's whole card.
+- GitHub's API allows 60 unauthenticated calls an hour per IP, shared by everyone at a venue. Repos are now read from the tarball, with a tree-walk fallback for folders deep in huge monorepos.
+- A stalled download could hang a meeting. There's now a hard 12 s cap; the meeting always opens.
+- An assistant could answer a stale meeting first. Now: oldest unanswered meeting from the last 10 minutes.
+- Privacy: an assistant's prose while answering meetings restates guests' material, and was going onto the owner's card. The indexer now skips it.
+
+Restart while a guest waits: meeting opened, coordinator restarted, then the page and card answered 200, Weston's assistant answered 19 s later, and the guest's page showed 3 findings at the same URL (Elastic Serverless).

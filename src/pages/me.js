@@ -1,6 +1,6 @@
 // The owner's card page: the one switch, totals, open meetings, and every shared passage with
 // Keep private. The card key arrives in the URL fragment (never sent to the server in the URL)
-// and is remembered on this device so scanning someone else's card offers "Tap as you".
+// and is remembered on this device so scanning someone else's card offers "Meet as you".
 import { $, esc, api, hhmm, store } from '/roloe.js';
 
 const owner = location.pathname.split('/').pop();
@@ -8,7 +8,7 @@ const fromHash = location.hash.slice(1);
 if (fromHash) { store.set('roloe.me', { owner, key: fromHash, name: owner }); history.replaceState(null, '', location.pathname); }
 const me = store.get('roloe.me');
 const key = me?.owner === owner ? me.key : '';
-$('#cardlink').href = `/c/${owner}`;
+$('#cardlink').href = `/q/${owner}`;
 
 function err(e) { $('#err').hidden = false; $('#err').textContent = e.status === 401 ? 'Open this page from the link `roloe me` prints; it carries your card key.' : e.offline ? 'Offline.' : e.message; }
 
@@ -18,7 +18,7 @@ async function load() {
   store.set('roloe.me', { owner, key, name: r.name });
   $('#tab').innerHTML = `${esc(r.name)} <span class="mono">· updated ${esc(hhmm(r.card?.updated))}</span>`;
   $('#toggle').setAttribute('aria-checked', String(r.sharing));
-  $('#scope').textContent = r.sharing ? `Scope: ${r.card?.scope || "today's project"}` : 'Off: your card is empty and nobody can tap it.';
+  $('#scope').textContent = r.sharing ? `Scope: ${r.card?.scope || "today's project"}` : 'Off: your card is empty and nobody can scan it.';
   const t = r.card?.totals || {};
   $('#totals').innerHTML = [['passages', r.passages.length], ['sessions', t.sessions], ['files', t.files], ['commits', t.commits], ['secrets removed', t.secrets_removed], ['kept private', r.private.length]]
     .map(([k, v]) => `<div><b>${v ?? 0}</b><span class="muted" style="font-size:14px">${k}</span></div>`).join('');

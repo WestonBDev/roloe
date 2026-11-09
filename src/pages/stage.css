@@ -20,6 +20,10 @@ body.stage { --pitch: 44px; padding: 28px 40px 0; min-height: 100vh; display: fl
 .stage .card > .tab { font-size: 18px; height: 30px; top: -29px; }
 .stage .more { color: var(--pencil); font-size: 20px; }
 .stage .tryline { font: 600 30px/1.2 var(--sans); min-height: 40px; }
+.stage .judgeqr { position: fixed; right: 28px; bottom: 74px; width: 250px; background: #fff; color: #111; border-radius: 12px; padding: 12px 12px 8px; text-align: center; box-shadow: var(--shadow); }
+.stage .judgeqr p { margin: 6px 0 0; font: 700 18px/1.2 var(--sans); color: #111; }
+.stage .judgeqr svg { width: 100%; height: auto; display: block; }
+@media (max-width: 1000px) { .stage .judgeqr { position: static; margin: 12px auto; } }
 .stage .strip { display: flex; flex-wrap: wrap; gap: 8px 36px; padding: 14px 0 18px; border-top: 1px solid var(--rule); font: 400 17px/1.4 var(--mono); color: var(--pencil); }
 .stage .strip b { color: var(--ink); font-weight: 600; }
 .stage .strip .group { display: flex; gap: 8px 22px; flex-wrap: wrap; align-items: baseline; }

@@ -48,7 +48,7 @@ export async function api(cfg, method, path, body, { key = cfg.key, timeoutMs = 
 // Index the project and upload. Returns counts. Removed values stay in the local config.
 export async function refreshCard(cfg) {
   const { buildCard } = await import('./indexer.mjs');
-  const card = buildCard({ owner: cfg.owner, projectDir: cfg.project });
+  const card = buildCard({ owner: cfg.owner, projectDir: cfg.project, offLimits: cfg.offLimits || [] });
   cfg.removed = [...new Set([...(cfg.removed || []), ...card.removed])].slice(-500);
   saveConfig(cfg);
   const scope = `today's work in ${cfg.project.split('/').pop()}`;

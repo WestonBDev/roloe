@@ -5,7 +5,7 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z } from 'zod';
-import { loadConfig, api, refreshCard } from './client.mjs';
+import { loadConfig, saveConfig, api, refreshCard } from './client.mjs';
 import { gate } from './gate.mjs';
 
 const SERVER_INSTRUCTIONS = `Roloe: when someone taps cards with your user, a notification or roloe_wait_for_tap gives you an encounter.
@@ -18,6 +18,15 @@ const plain = (s) => String(s || '').replace(/[^\p{L}\p{N} .'-]/gu, '').slice(0,
 const text = (obj) => ({ content: [{ type: 'text', text: JSON.stringify(obj, null, 1) }] });
 const fail = (msg) => ({ content: [{ type: 'text', text: msg }], isError: true });
 
+// Which meeting to answer next: unanswered, from the last 10 minutes, oldest first. A guest who
+// scanned an hour ago and left must not be served before the person standing there now.
+const FRESH_MS = 10 * 60e3;
+export function nextMeeting(list, now = Date.now()) {
+  return list
+    .filter((e) => !e.posted && (e.status ?? 'open') === 'open' && now - Date.parse(e.created) < FRESH_MS)
+    .sort((a, b) => Date.parse(a.created) - Date.parse(b.created))[0];
+}
+
 export async function runMcp() {
   const cfg = loadConfig();
   const seen = new Set();          // encounters already surfaced to this session
@@ -27,18 +36,16 @@ export async function runMcp() {
   );
 
   const inbox = async () => (await api(cfg, 'GET', '/api/me/encounters')).encounters;
-  const latestOpen = async () => (await inbox()).find((e) => !e.posted);
+  const latestOpen = async () => nextMeeting(await inbox());
   const pull = async (id) => api(cfg, 'GET', `/api/e/${id}/pull`);
 
   server.registerTool('roloe_wait_for_tap', {
-    description: 'Wait (up to timeout_s) for someone to tap cards with your user, then return that encounter\'s pull: their overlapping passages, yours, and the rules. Call again if it returns no tap yet.',
+    description: 'Wait (up to timeout_s) for someone to scan your user\'s card or meet them, then return that encounter\'s pull: their overlapping passages, yours, and the rules. Call again if it returns no tap yet.',
     inputSchema: { timeout_s: z.number().min(1).max(110).optional() },
   }, async ({ timeout_s = 50 }) => {
     const until = Date.now() + timeout_s * 1000;
-    const start = new Set((await inbox()).map((e) => e.id));
     for (;;) {
-      const list = await inbox();
-      const fresh = list.find((e) => !e.posted && (!start.has(e.id) || !seen.has(e.id)));
+      const fresh = nextMeeting(await inbox());
       if (fresh) { seen.add(fresh.id); return text(await pull(fresh.id)); }
       if (Date.now() > until) return text({ tap: null, message: 'No tap yet. Call roloe_wait_for_tap again to keep waiting.' });
       await new Promise((r) => setTimeout(r, 700));
@@ -70,9 +77,9 @@ export async function runMcp() {
   }, async ({ encounter_id, findings = [], nothing_strong = false }) => {
     // Local egress gate: the owner's own removed values never leave this machine.
     const fresh = loadConfig(cfg.owner);
-    const blocked = findings.map((f, i) => ({ i, g: gate(JSON.stringify(f), fresh.removed || []) })).filter((x) => !x.g.ok);
+    const blocked = findings.map((f, i) => ({ i, g: gate(JSON.stringify(f), fresh.removed || [], fresh.offLimits || []) })).filter((x) => !x.g.ok);
     if (blocked.length) {
-      return fail(`Blocked on this machine before sending: finding ${blocked.map((b) => b.i + 1).join(', ')} contains ${blocked[0].g.reason === 'known secret' ? 'a value your user\'s scrubber removed' : 'a secret-shaped string'}. Rewrite it without that value and post again. Nothing was sent.`);
+      return fail(`Blocked on this machine before sending: finding ${blocked.map((b) => b.i + 1).join(', ')} contains ${blocked[0].g.reason === 'known secret' ? 'a value your user\'s scrubber removed' : blocked[0].g.reason === 'off-limits' ? 'a term your user marked off-limits' : 'a secret-shaped string'}. Rewrite it without that value and post again. Nothing was sent.`);
     }
     const body = nothing_strong || !findings.length ? { nothing_strong: true } : { findings };
     return text(await api(cfg, 'POST', `/api/e/${encounter_id}/findings`, body));
@@ -85,6 +92,20 @@ export async function runMcp() {
     const id = encounter_id || (await inbox())[0]?.id;
     if (!id) return fail('No encounters yet.');
     return text(await api(cfg, 'GET', `/api/e/${id}/for-me`));
+  });
+
+  server.registerTool('roloe_off_limits', {
+    description: 'List, add or remove your user\'s off-limits terms (names, clients, topics). They are removed from the card before indexing and blocked from any finding. Only change them when your user asks.',
+    inputSchema: { action: z.enum(['list', 'add', 'remove']), terms: z.array(z.string().min(2).max(80)).max(50).optional() },
+  }, async ({ action, terms = [] }) => {
+    const c = loadConfig(cfg.owner);
+    const set = new Set(c.offLimits || []);
+    if (action === 'add') terms.forEach((t) => set.add(t.trim()));
+    if (action === 'remove') terms.forEach((t) => set.delete(t.trim()));
+    c.offLimits = [...set];
+    saveConfig(c);
+    if (action !== 'list') await refreshCard(c);
+    return text({ off_limits: c.offLimits, card: action === 'list' ? 'unchanged' : 'refreshed' });
   });
 
   server.registerTool('roloe_inbox', {
@@ -107,7 +128,7 @@ export async function runMcp() {
         const name = plain(e.with_name);
         await server.server.notification({
           method: 'notifications/claude/channel',
-          params: { content: `${name} just tapped cards with you (Roloe encounter ${e.id}). What do ${name} and I have for each other?`, meta: { encounter_id: e.id, with: plain(e.with), guest: String(e.guest) } },
+          params: { content: `${name} just ${e.guest ? 'scanned your Roloe card' : 'met you through Roloe'} (encounter ${e.id}). What do ${name} and I have for each other?`, meta: { encounter_id: e.id, with: plain(e.with), guest: String(e.guest) } },
         });
       }
     } catch { /* coordinator unreachable: try again next tick */ }

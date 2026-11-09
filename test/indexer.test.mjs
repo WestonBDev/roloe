@@ -101,3 +101,22 @@ test('a private key that crosses a chunk boundary is removed whole (Gitar)', asy
   assert.ok(!all.includes('QwErTyQwErTy'), 'no key body in any passage');
   assert.ok(!all.includes('PRIVATE KEY-----'), 'no key armor in any passage');
 });
+
+test('what an assistant says while answering a Roloe meeting never goes on the owner\'s card (it restates the other person\'s material)', async () => {
+  const { writeFileSync } = await import('node:fs');
+  const t = new Date().toISOString();
+  const lines = [
+    { type: 'user', timestamp: t, message: { content: 'Wait for Roloe meetings: call roloe_wait_for_tap, follow the instructions it returns, post your findings, then call it again. Keep going until I say stop.' } },
+    { type: 'assistant', timestamp: t, message: { content: [{ type: 'text', text: 'Waiting for the next meeting now, calling the tool.' }, { type: 'tool_use', name: 'mcp__roloe__roloe_wait_for_tap', input: {} }] } },
+    { type: 'assistant', timestamp: t, message: { content: [{ type: 'text', text: 'The guest is building GuestSecretProjectZeta, their payment retry queue drops jobs; I posted two findings.' }] } },
+    { type: 'user', timestamp: t, message: { content: 'ok now back to the stage clock, make it bigger please' } },
+    { type: 'assistant', timestamp: t, message: { content: [{ type: 'text', text: 'Made the stage clock 104px and kept it tabular so the digits do not jump.' }] } },
+  ];
+  writeFileSync(join(claudeDir, 'meet0000-0000-0000-0000-000000000000.jsonl'), lines.map((l) => JSON.stringify(l)).join('\n'));
+  const { passages } = buildCard({ owner: 'w', projectDir: project });
+  const all = JSON.stringify(passages);
+  assert.ok(!all.includes('GuestSecretProjectZeta'), 'meeting prose stays off the card');
+  assert.ok(!all.includes('Wait for Roloe meetings'), 'the waiting instruction is not a lesson');
+  assert.ok(all.includes('ok now back to the stage clock'), 'the owner\'s own work afterwards is kept');
+  assert.ok(all.includes('Made the stage clock 104px'));
+});

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { startTestServer, twoCards } from './helpers.mjs';
+import { startTestServer, twoCards, waitReady } from './helpers.mjs';
 
 const sha = (s) => createHash('sha256').update(s).digest('hex');
 const good = { cites: 'p-a00001', quote: 'mark the combined total partial', about: 'p-e00001', what: 'Aiden marks totals partial.' };
@@ -90,7 +90,7 @@ test('guest tap: no account, optional https link, the owner\'s assistant gets th
     const g = await s.call('POST', '/api/g/wes/start', { link: 'https://github.com/example/repo', name: 'Judge <x>' });
     assert.equal(g.status, 201);
     const { id, key } = g.body;
-    const view = (await s.call('GET', `/api/e/${id}?k=${key}`)).body;
+    const view = await waitReady(s, id, key);
     assert.equal(view.guest, true);
     assert.equal(view.their_name, 'Wes');
     assert.equal(view.my_name, 'Judge x');
@@ -118,6 +118,7 @@ test('the judge\'s extraction attempt: scope finds nothing, a secret-shaped requ
     assert.equal((await s.call('POST', '/api/canaries', { value: canary })).status, 401);
     assert.equal((await s.call('POST', '/api/canaries', { value: canary }, wes)).status, 201);
     const { body: { id, key } } = await s.call('POST', '/api/g/wes/start', {});
+    await waitReady(s, id, key);
     const one = (await s.call('POST', `/api/e/${id}/probe?k=${key}`, { q: canary })).body;
     assert.equal(one.result, 'nothing');
     assert.match(one.message, /Nothing found/);

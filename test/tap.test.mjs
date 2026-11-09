@@ -26,6 +26,7 @@ test('a tap copies both cards into the encounter, precomputes overlap both ways,
     assert.equal(inbox.body.encounters[0].with, 'aiden');
     assert.match(inbox.body.encounters[0].link, new RegExp(`/e/${id}\\?k=`));
     assert.notEqual(inbox.body.encounters[0].link, link, 'each side has its own key');
+    assert.equal(inbox.body.encounters[0].stage, stage, 'each participant can open the stage for their meeting');
 
     const enc = s.state().encounters[id];
     assert.ok(enc.overlap.aiden.theirs.includes('p-e00001'), 'Aiden gives to Wes: overlap in Wes\'s passages');

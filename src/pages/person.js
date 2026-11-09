@@ -40,11 +40,21 @@ function sealSection(v) {
 
 function waitSection(v) {
   const theirs = v.their_side;
+  if (v.status === 'preparing') {
+    return `<div class="card"><span class="tab">Opening your meeting with ${esc(v.their_name)}</span>
+      <h2>${v.guest_input?.kind === 'reading' ? 'Reading what you gave…' : 'Getting the cards side by side…'}</h2>
+      <p class="state wait">Keep talking. This takes a few seconds.</p></div>`;
+  }
+  if (v.status === 'failed') {
+    return `<div class="card"><span class="tab">Couldn't open</span><h2>${esc(v.guest_input?.error || 'This meeting could not be opened.')}</h2>
+      <p><a href="/g/${esc(v.them)}">Scan again</a></p></div>`;
+  }
   if (v.status !== 'open' || theirs.posted) return '';
   const n = Math.round((Date.now() - firstSeen) / 1000);
   return `<div class="card"><span class="tab">${esc(v.their_name)}'s assistant is reading</span>
-    <h2>Keep talking. We'll tap you when there's something.</h2>
-    <p class="state wait"><span class="mono" id="secs">${n} s</span></p></div>`;
+    <h2>Keep talking. We'll show it here when there's something.</h2>
+    <p class="state wait"><span class="mono" id="secs">${n} s</span></p>
+    ${n > 60 ? `<p class="muted" style="margin-top:6px">Still reading. ${esc(v.their_name)}'s assistant sometimes takes a little longer. This page updates by itself, and this link keeps working if you come back later.</p>` : ''}</div>`;
 }
 
 function findingsSection(v) {
@@ -84,8 +94,12 @@ function receiptSection(v) {
 
 function guestSection(v) {
   if (!v.guest) return '';
+  const gi = v.guest_input || {};
+  const read = gi.error ? `<div class="card"><span class="tab">About your link</span><p>${esc(gi.error)}</p><p class="muted">The meeting goes on with what you wrote, or with ${esc(v.their_name)}'s most useful work.</p></div>`
+    : gi.kind === 'github' ? `<p class="muted">Read ${gi.files ?? 0} files from your repo, for this meeting only.</p>`
+    : gi.kind === 'page' ? '<p class="muted">Read the text of your link, for this meeting only.</p>' : '';
   const done = v.their_side.posted;
-  return `${done ? `<div class="card"><span class="tab">Your turn, if you like</span>
+  return `${read}${done ? `<div class="card"><span class="tab">Your turn, if you like</span>
       <p>Get findings from your own work too: <code>git clone https://github.com/WestonBDev/roloe</code>, then <code>roloe on</code>. It's an offer, not a gate.</p></div>` : ''}
     <form class="card" id="probe"><span class="tab">Try to extract something</span>
       <label for="q"><p>Type anything you think ${esc(v.their_name)} might have that wasn't shared. This asks the coordinator directly, not anyone's assistant.</p></label>
@@ -110,7 +124,7 @@ function render(v) {
   draw.expect(expectSection(v));
   draw.thanks(thanksSection(v));
   if (draw.guest(guestSection(v))) wireProbe();
-  draw.receipt(v.status === 'open' ? receiptSection(v) : `<div class="card"><span class="tab">Stopped</span><p>This meeting was stopped${v.closed ? ` at ${esc(hhmm(v.closed.at))}` : ''}. Its key is revoked and its ${v.closed?.deleted ?? ''} shared copies are deleted; a query with the old key now returns ${v.closed?.query_after_stop ?? 0}.</p></div>`);
+  draw.receipt(v.status === 'open' ? receiptSection(v) : v.status !== 'closed' ? '' : `<div class="card"><span class="tab">Stopped</span><p>This meeting was stopped${v.closed ? ` at ${esc(hhmm(v.closed.at))}` : ''}. Its key is revoked and its ${v.closed?.deleted ?? ''} shared copies are deleted; a query with the old key now returns ${v.closed?.query_after_stop ?? 0}.</p></div>`);
 }
 
 function wireSeal(v) {

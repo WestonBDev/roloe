@@ -49,3 +49,13 @@ export async function twoCards(s) {
   return { wes, aiden };
 }
 
+
+// A guest meeting opens at once and gets ready behind the scenes: wait for that.
+export async function waitReady(s, id, key, ms = 5000) {
+  const until = Date.now() + ms;
+  for (;;) {
+    const v = (await s.call('GET', `/api/e/${id}?k=${key}`)).body;
+    if (v.status !== 'preparing' || Date.now() > until) return v;
+    await new Promise((r) => setTimeout(r, 25));
+  }
+}

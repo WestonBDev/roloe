@@ -9,19 +9,19 @@ import { record } from './metrics.mjs';
 export const sideLink = (enc, who) => `${config.publicUrl}/e/${enc.id}?k=${enc.sides[who].key}`;
 export const stageLink = (enc) => `${config.publicUrl}/stage/${enc.id}?k=${enc.stageKey}`;
 
-function newSide() {
+export function newSide() {
   return { key: newKey('sk'), seal: null, posted: false, nothing_strong: false, retrieved_by_other: [], findings_seen: false };
 }
 
-export async function createEncounter(store, a, b, { guest = null } = {}) {
-  const id = newId('e', 5);
-  const now = Date.now();
+export async function createEncounter(store, a, b, { guest = null, guestPassages = [], preset = null } = {}) {
+  const id = preset?.id || newId('e', 5);
+  const now = preset?.tap || Date.now();
   const enc = {
     id, a: a.owner, b: b.owner, names: { [a.owner]: a.name, [b.owner]: b.name },
     created: new Date(now).toISOString(), status: 'open', guest,
     // Two cards of one person: allowed as a labelled last resort, and every screen says so.
     same_person: Boolean(a.same_person_as === b.owner || b.same_person_as === a.owner || (a.same_person_as && a.same_person_as === b.same_person_as)),
-    stageKey: newKey('stk'), sides: { [a.owner]: newSide(), [b.owner]: newSide() },
+    stageKey: preset?.stageKey || newKey('stk'), sides: preset?.sides || { [a.owner]: newSide(), [b.owner]: newSide() },
     findings: [], dropped: [], tries: [], tryStatus: null, thanks: [],
     times: { tap: now, ready: null, first_findings: null, all_findings: null, green: null },
     overlap: {}, keyId: null, trace: null, closed: null,
@@ -29,7 +29,7 @@ export async function createEncounter(store, a, b, { guest = null } = {}) {
   enc.trace = startEncounterTrace(id, { 'roloe.guest': Boolean(guest) });
   const ref = { encounterId: id, ...enc.trace };
   try {
-    await buildEncounter(store, enc, ref, a, b, guest);
+    await buildEncounter(store, enc, ref, a, b, guest, guestPassages);
   } catch (e) {
     // Leave nothing half-built: no copies, no live key, no open record.
     if (enc.keyId) await store.invalidateKey(enc.keyId).catch(() => {});
@@ -45,7 +45,7 @@ export async function createEncounter(store, a, b, { guest = null } = {}) {
   return enc;
 }
 
-async function buildEncounter(store, enc, ref, a, b, guest) {
+async function buildEncounter(store, enc, ref, a, b, guest, guestPassages) {
   const id = enc.id;
 
   await step('roloe.tap', ref, { 'roloe.side_a': hmac(id, a.owner), 'roloe.side_b': hmac(id, b.owner) }, async (span) => {
@@ -57,10 +57,17 @@ async function buildEncounter(store, enc, ref, a, b, guest) {
     span.setAttributes({ 'roloe.scope.passages': copied, 'roloe.scope.mode': d.scope, 'roloe.store': d.store, 'roloe.key_id_hmac': hmac(id, key.id) });
   });
 
-  if (!guest) {
-    for (const [giver, recipient] of [[a.owner, b.owner], [b.owner, a.owner]]) {
+  // A guest's material (their repo, page or sentence) lives only inside this meeting.
+  if (guest && guestPassages.length) {
+    await step('roloe.guest_input', ref, { 'roloe.guest.kind': guest.kind || 'none', 'roloe.guest.passages': guestPassages.length }, async () => {
+      await store.addToEncounter(id, b.owner, b.name, guestPassages);
+    });
+  }
+  const directions = guest ? (guestPassages.length ? [[a.owner, b.owner]] : []) : [[a.owner, b.owner], [b.owner, a.owner]];
+  {
+    for (const [giver, recipient] of directions) {
       await step('roloe.overlap', ref, { 'roloe.giver': hmac(id, giver) }, async (span) => {
-        const o = await computeOverlap(store, enc.keyId, { giver, recipient, hybrid: store.describe().rrf === 'elasticsearch' });
+        const o = await computeOverlap(store, enc.keyId, { giver, recipient, hybrid: store.describe().rrf === 'elasticsearch', queriesFrom: guest ? 'recipient' : 'giver' });
         enc.overlap[giver] = { theirs: o.theirs, mine: o.mine };
         span.setAttributes({
           'roloe.overlap.queries': o.counts.queries, 'roloe.overlap.searches': o.counts.searches,
@@ -77,6 +84,6 @@ export function inboxEntry(enc, owner) {
   const other = enc.a === owner ? enc.b : enc.a;
   return {
     id: enc.id, with: other, with_name: enc.names[other], guest: Boolean(enc.guest), status: enc.status,
-    created: enc.created, link: sideLink(enc, owner), posted: enc.sides[owner].posted,
+    created: enc.created, link: sideLink(enc, owner), stage: stageLink(enc), posted: enc.sides[owner].posted,
   };
 }

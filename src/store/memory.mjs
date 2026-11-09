@@ -10,13 +10,16 @@ export function memoryStore({ dataDir } = {}) {
   const keys = new Map();      // keyId -> { encounter_id, valid }
   const file = dataDir ? join(dataDir, 'memory-store.json') : null;
   let timer = null;
+  const writeNow = () => {
+    if (!file) return;
+    clearTimeout(timer);
+    mkdirSync(dataDir, { recursive: true });
+    writeFileSync(file, JSON.stringify({ docs: docs.map(({ _tokens, ...d }) => d), keys: [...keys] }), { mode: 0o600 });
+  };
   const persist = () => {
     if (!file) return;
     clearTimeout(timer);
-    timer = setTimeout(() => {
-      mkdirSync(dataDir, { recursive: true });
-      writeFileSync(file, JSON.stringify({ docs: docs.map(({ _tokens, ...d }) => d), keys: [...keys] }), { mode: 0o600 });
-    }, 200);
+    timer = setTimeout(writeNow, 200);
   };
   const scope = (keyId) => {
     const k = keys.get(keyId);
@@ -61,6 +64,12 @@ export function memoryStore({ dataDir } = {}) {
       keys.set(id, { encounter_id: enc, valid: true });
       persist();
       return { id };
+    },
+    async flush() { writeNow(); },
+    async reattach(enc, keyId) {
+      const k = keys.get(keyId);
+      if (k?.valid) return { id: keyId };
+      return this.createEncounterKey(enc);
     },
     async invalidateKey(id) { const k = keys.get(id); if (k) k.valid = false; persist(); },
     async get(keyId, passageId, owner) {
