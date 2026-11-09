@@ -118,3 +118,22 @@ test('GitHub refusals become plain words, not status codes', async () => {
   assert.match(r.error, /not found|public/i);
   assert.ok(!/404/.test(r.error));
 });
+
+test('a reader that never returns can\'t hang a guest\'s meeting: it opens without the link and says why', async () => {
+  const http = await import('node:http');
+  const { buildApp } = await import('../src/coordinator.mjs');
+  const s = await startTestServer();
+  try {
+    await twoCards(s);
+    const app = buildApp({ store: s.store, guestReader: () => new Promise(() => {}), guestReadTimeoutMs: 300 });
+    const srv = http.createServer(app.handle);
+    await new Promise((r) => srv.listen(0, '127.0.0.1', r));
+    const base = `http://127.0.0.1:${srv.address().port}`;
+    const g = await (await fetch(`${base}/api/g/wes/start`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ link: 'https://github.com/acme/huge' }) })).json();
+    await new Promise((r) => setTimeout(r, 900));
+    const v = await (await fetch(`${base}/api/e/${g.id}?k=${g.key}`)).json();
+    assert.equal(v.status, 'open');
+    assert.match(v.guest_input.error, /in time/);
+    srv.close();
+  } finally { await s.close(); }
+});
