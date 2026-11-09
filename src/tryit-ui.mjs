@@ -94,8 +94,11 @@ export async function startTryUi({ cfg, encounterId, findingId, port = 7421 }) {
     diff = literalDiff(copy);
     await report('review');
   }
-  // If the page is abandoned (Ctrl-C), the throwaway copy still goes.
-  process.once('exit', () => { if (copy) rmSync(copy, { recursive: true, force: true }); });
+  // If the page is abandoned (Ctrl-C or a kill), the throwaway copy still goes. Node emits no
+  // 'exit' for an unhandled signal, so handle the signals themselves.
+  const cleanup = () => { if (copy) { rmSync(copy, { recursive: true, force: true }); copy = null; } };
+  process.once('exit', cleanup);
+  for (const sig of ['SIGINT', 'SIGTERM', 'SIGHUP']) process.once(sig, () => { cleanup(); process.exit(130); });
   let resolveDone;
   const done = new Promise((r) => { resolveDone = r; });
   if (!applied.ok) resolveDone({ state: 'did-not-apply', reason: applied.reason });
@@ -149,5 +152,5 @@ export async function startTryUi({ cfg, encounterId, findingId, port = 7421 }) {
   });
   await new Promise((r) => server.listen(port, '127.0.0.1', r));
   const url = `http://127.0.0.1:${server.address().port}/`;
-  return { url, done, finding, close: () => new Promise((r) => server.close(r)) };
+  return { url, done, finding, get copyPath() { return copy; }, close: () => new Promise((r) => server.close(r)) };
 }

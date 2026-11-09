@@ -495,6 +495,7 @@ export function buildApp({ store }) {
   const guestHits = new Map();
   const limited = (key, max, windowMs = 60_000) => {
     const now = Date.now();
+    if (guestHits.size > 5000) for (const [k, v] of guestHits) if (!v.some((t) => now - t < windowMs)) guestHits.delete(k);
     const hits = (guestHits.get(key) || []).filter((t) => now - t < windowMs);
     hits.push(now);
     guestHits.set(key, hits);
@@ -503,7 +504,10 @@ export function buildApp({ store }) {
   r.add('POST', '/api/g/:owner/start', async ({ req, res, params, span }) => {
     const o = state.owners[params.owner];
     if (!o) throw new HttpError(404, 'no_card', 'No card by that name');
-    const ip = String(req.headers['x-forwarded-for'] || req.socket.remoteAddress || '').split(',')[0].trim();
+    // X-Forwarded-For is only believed behind a proxy we run (ROLOE_TRUST_PROXY=1, set in the cluster).
+    const ip = process.env.ROLOE_TRUST_PROXY === '1' && req.headers['x-forwarded-for']
+      ? String(req.headers['x-forwarded-for']).split(',').pop().trim()
+      : String(req.socket.remoteAddress || '');
     if (limited(`ip:${ip}`, 30) || limited(`card:${o.owner}`, 60)) throw new HttpError(429, 'slow_down', 'Too many taps on this card just now. Try again in a minute.');
     if (!o.sharing) throw new HttpError(409, 'switch_off', `${o.name}'s card isn't sharing right now`);
     const b = await readJson(req, 10_000);
