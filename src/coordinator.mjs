@@ -499,6 +499,7 @@ export function buildApp({ store, guestReader = readGuestInput, guestReadTimeout
       enc.closed = { at: new Date().toISOString(), by: me, deleted: 0, query_after_stop: 0, before_open: true };
       endEncounterTrace(enc.id, { 'roloe.closed': true, 'roloe.closed_before_open': true });
       destroyHmacKey(enc.id);
+      syncMeeting(store, enc);
       save();
       return send(res, 200, enc.closed);
     }
@@ -595,6 +596,7 @@ export function buildApp({ store, guestReader = readGuestInput, guestReadTimeout
           await store.invalidateKey(created.keyId).catch(() => {});
           await store.deleteEncounter(created.id).catch(() => {});
           state.encounters[enc.id] = enc;
+          syncMeeting(store, enc);
           save();
         }
       } catch (e) {
