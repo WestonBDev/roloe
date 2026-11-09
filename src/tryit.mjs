@@ -124,7 +124,14 @@ export function plan(dir) {
   return null;
 }
 
-export async function runSandboxed(dir, { onState = () => {}, onOutput = () => {}, testTimeoutMs = 120000, keepCopy = false } = {}) {
+// The dependency install keeps the network (it fetches from the lockfile) but is otherwise as
+// locked down as the test run: no capabilities, no privilege gain, read-only root, this user.
+export function installArgs({ dir, cacheDir, image, cmd, user, name, cacheMount, cacheEnv }) {
+  return ['run', '--rm', '--name', name, '--user', user, '--cap-drop', 'ALL', '--security-opt', 'no-new-privileges', '--read-only', '--tmpfs', '/tmp:exec',
+    '-v', `${dir}:/w`, '-v', `${cacheDir}:${cacheMount}`, '-w', '/w', '-e', 'HOME=/tmp', '-e', `${cacheEnv}=${cacheMount}`, image, 'sh', '-c', cmd];
+}
+
+export async function runSandboxed(dir, { onState = () => {}, onOutput = () => {}, testTimeoutMs = 120000, keepCopy = false, cacheDir: ownCacheDir = null } = {}) {
   const started = Date.now();
   // Run as this user, so nothing in the copy ends up owned by root (and the copy can be deleted).
   const user = `${process.getuid?.() ?? 1000}:${process.getgid?.() ?? 1000}`;
@@ -142,9 +149,9 @@ export async function runSandboxed(dir, { onState = () => {}, onOutput = () => {
     }
     if (p.install) {
       // Dependencies from the lockfile, with network, in Linux (a macOS node_modules won't run here).
-      const cacheDir = join(homedir(), '.cache', 'roloe', 'pkg-cache');
+      const cacheDir = ownCacheDir || join(homedir(), '.cache', 'roloe', 'pkg-cache');
       mkdirSync(cacheDir, { recursive: true });
-      const r = await docker(['run', '--rm', '--name', `${container}-deps`, '--user', user, '-v', `${dir}:/w`, '-v', `${cacheDir}:${p.cache}`, '-w', '/w', '-e', 'HOME=/tmp', '-e', `${p.cacheEnv}=${p.cache}`, p.image, 'sh', '-c', p.install], { onData: onOutput, name: `${container}-deps` });
+      const r = await docker(installArgs({ dir, cacheDir, image: p.image, cmd: p.install, user, name: `${container}-deps`, cacheMount: p.cache, cacheEnv: p.cacheEnv }), { onData: onOutput, name: `${container}-deps` });
       output += r.out;
       if (r.code !== 0) { onState('failed'); return { state: 'failed', reason: 'dependency install failed', output, passed: null, failed: null, test_ms: 0 }; }
     }

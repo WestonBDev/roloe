@@ -121,6 +121,7 @@ test('guest Try it hardening: runs only the diff the guest approved, cleans up a
   git('init', '-q'); git('config', 'user.email', 't@example.com'); git('config', 'user.name', 't');
   mkdirSync(join(src, 'pkg'), { recursive: true });
   writeFileSync(join(src, 'pkg', 'retry.js'), 'export const retry = (fn) => fn();\n');
+  writeFileSync(join(src, 'pkg', 'package.json'), JSON.stringify({ name: 'pkg', scripts: { test: 'node --test' } }));
   git('add', '.'); git('commit', '-qm', 'init');
   const clone = async (job, dest) => { cpSync(src, dest, { recursive: true }); };
   const s = await startTestServer();

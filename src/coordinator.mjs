@@ -635,8 +635,9 @@ export function buildApp({ store, guestReader = readGuestInput, guestReadTimeout
     for (const enc of Object.values(state.encounters)) {
       if (enc.status !== 'open' || !enc.guest?.repo || enc.a !== me.owner) continue;
       for (const f of enc.findings) {
-        if (f.giver !== me.owner || !['diff-pending', 'approved'].includes(f.try?.state)) continue;
-        jobs.push({ encounter_id: enc.id, finding: f.id, repo: enc.guest.repo, ref: enc.guest.ref || 'HEAD', path: enc.guest.path || '', edits: f.change.edits, state: f.try.state });
+        if (f.giver !== me.owner || !['diff-pending', 'review', 'approved'].includes(f.try?.state)) continue;
+        jobs.push({ encounter_id: enc.id, finding: f.id, repo: enc.guest.repo, ref: enc.guest.ref || 'HEAD', path: enc.guest.path || '', edits: f.change.edits, state: f.try.state,
+          ...(f.try.state === 'approved' ? { approved_diff: f.try.diff ?? '' } : {}) });
       }
     }
     send(res, 200, { jobs });
@@ -650,6 +651,7 @@ export function buildApp({ store, guestReader = readGuestInput, guestReadTimeout
     const enc = getEncounter(params.id);
     const me = encOwner(req, enc);
     if (!enc.guest || enc.a !== me) throw new HttpError(403, 'not_giver', 'Only the card owner runs a guest\'s Try it');
+    if (enc.status !== 'open') throw new HttpError(410, 'stopped', 'This meeting was stopped');
     const b = await readJson(req, 200_000);
     const f = enc.findings.find((x) => x.id === b.finding && x.giver === me && x.try);
     if (!f) throw new HttpError(404, 'no_finding', 'No such Try it');
