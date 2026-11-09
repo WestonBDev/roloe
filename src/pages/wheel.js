@@ -7,7 +7,7 @@ import { $, esc, api, hhmm, store } from '/roloe.js';
 const still = matchMedia('(prefers-reduced-motion: reduce)').matches;
 const wheel = (store.get('roloe.wheel') || []).sort((a, b) => b.at - a.at);
 const fresh = new URLSearchParams(location.search).get('new');
-const BACK = 12, FRONT = 6;   // blank cards behind the first card and ahead of the last
+const BACK = 5, FRONT = 3;   // blank cards behind the first card and ahead of the last
 let target = 0;               // the card standing up
 let p = 0;                    // where the file is right now (fractional mid-turn)
 let soundOn = store.get('roloe.sound') ?? true;
@@ -34,7 +34,7 @@ function click() {
 // Where a card leans, by how far it is from the reading position (degrees about the spindle;
 // positive leans back, negative leans toward you). The reading card leans back a touch.
 const READ = 8;
-const FLAT = -84;   // cards to come lie almost flat toward you, below the reading card, so they never cover it
+const FLAT = -78;   // cards to come lie almost flat toward you, below the reading card, so they never cover it
 export const angleFor = (d) => (d <= -1 ? READ + 22 + (-d - 1) * 4.2 : d <= 0 ? READ + 22 * -d : d >= 1 ? FLAT - (d - 1) * 2.4 : FLAT + (READ - FLAT) * (1 - d));
 
 async function face(entry) {
@@ -66,18 +66,20 @@ function build() {
       <div class="paper">${e ? `<div class="face" id="face-${i}"></div>` : ''}<i class="shade"></i></div></div>`;
   }
   spin.innerHTML = `${html}<div class="hub"></div><div class="knob l"></div><div class="knob r"></div>`;
-  leaves = [...spin.querySelectorAll('.leaf')].map((el) => ({ el, i: Number(el.dataset.i), shade: el.querySelector('.shade'), face: el.querySelector('.face') }));
+  leaves = [...spin.querySelectorAll('.leaf')].map((el) => ({ el, i: Number(el.dataset.i), shade: el.querySelector('.shade') }));
   wheel.forEach(async (e, i) => { const html2 = await face(e); const el = $(`#face-${i}`); if (el) el.innerHTML = html2; });
 }
 
+// Only two things ever change on a card: its angle and how dark its shade is. Both are animated
+// by the compositor (a CSS transition on transform and on opacity), so a turn never repaints a
+// card. Repainting every card on every frame is what left cards blank mid-turn on a busy phone.
 function paint() {
   for (const l of leaves) {
     const d = l.i - p;
     const a = angleFor(d);
     l.el.style.transform = `rotateX(${a.toFixed(2)}deg)`;
-    l.el.style.visibility = a > 150 || a < -104 ? 'hidden' : 'visible';
-    l.shade.style.opacity = (Math.min(1, Math.abs(a - READ) / 110) * 0.5).toFixed(3);
-    if (l.face) l.face.style.opacity = (Math.max(0, Math.min(1, (a + 20) / 26)) * (d > -0.9 ? 1 : 0)).toFixed(3);
+    l.shade.style.opacity = (Math.min(1, Math.abs(a - READ) / 110) * 0.5).toFixed(2);
+    l.el.classList.toggle('ahead', d > 0.5);   // a card still to come shows its ruled face, not its words
   }
 }
 
@@ -88,20 +90,11 @@ function label() {
   if (e) { $('#open').href = `/e/${e.id}?k=${encodeURIComponent(e.key)}`; $('#say').textContent = `${e.name}, ${hhmm(e.at)}. Card ${target + 1} of ${wheel.length}.`; }
 }
 
-// Turn toward `target` with a short spring: a little past, then settle.
-let raf = 0;
-function settle(from = p, ms = 420) {
-  cancelAnimationFrame(raf);
-  if (still) { p = target; paint(); return; }
-  const t0 = performance.now();
-  const back = (x) => 1 + 2.2 * (x - 1) ** 3 + 1.2 * (x - 1) ** 2;   // ease out, with a small overshoot
-  const step = (now) => {
-    const x = Math.min(1, (now - t0) / ms);
-    p = from + (target - from) * back(x);
-    paint();
-    if (x < 1) raf = requestAnimationFrame(step);
-  };
-  raf = requestAnimationFrame(step);
+// Turn to `target`: set where every card ends up and let the transition carry it there.
+function settle() {
+  rolo.classList.remove('dragging');
+  p = target;
+  paint();
 }
 
 function go(d) {
@@ -118,8 +111,9 @@ if (!wheel.length) {
   $('#controls').hidden = wheel.length < 2;
   label();
   // A card you just got flips up into place.
-  if (!still && fresh && wheel[0]?.id === fresh) { p = -0.98; paint(); setTimeout(() => { click(); settle(-0.98, 620); }, 250); } else paint();
-  addEventListener('resize', () => { build(); paint(); });
+  if (!still && fresh && wheel[0]?.id === fresh) { rolo.classList.add('dragging'); p = -0.98; paint(); setTimeout(() => { click(); settle(); }, 350); } else paint();
+  let lastW = innerWidth;
+  addEventListener('resize', () => { if (innerWidth !== lastW) { lastW = innerWidth; build(); paint(); } });   // a phone's toolbar sliding away is not a new layout
 
   $('#prev').onclick = () => go(-1);
   $('#next').onclick = () => go(1);
@@ -127,13 +121,13 @@ if (!wheel.length) {
 
   // Drag turns the file under your finger; letting go settles on the nearest card (a flick carries one more).
   let y0 = null, p0 = 0, moved = 0, lastY = 0, lastT = 0, vel = 0;
-  rolo.addEventListener('pointerdown', (e) => { y0 = lastY = e.clientY; p0 = p; moved = 0; vel = 0; lastT = e.timeStamp; cancelAnimationFrame(raf); rolo.setPointerCapture?.(e.pointerId); });
+  rolo.addEventListener('pointerdown', (e) => { y0 = lastY = e.clientY; p0 = p; moved = 0; vel = 0; lastT = e.timeStamp; rolo.setPointerCapture?.(e.pointerId); });
   rolo.addEventListener('pointermove', (e) => {
     if (y0 == null) return;
     const dy = y0 - e.clientY;   // up = forward
     moved = Math.max(moved, Math.abs(dy));
     vel = (lastY - e.clientY) / Math.max(1, e.timeStamp - lastT); lastY = e.clientY; lastT = e.timeStamp;
-    if (!still) { p = Math.max(-0.35, Math.min(wheel.length - 0.65, p0 + dy / 170)); paint(); }
+    if (!still && moved > 8) { rolo.classList.add('dragging'); p = Math.max(-0.35, Math.min(wheel.length - 0.65, p0 + dy / 170)); paint(); }
   });
   const release = (e) => {
     if (y0 == null) return;
