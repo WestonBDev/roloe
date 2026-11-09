@@ -18,6 +18,8 @@ export async function createEncounter(store, a, b, { guest = null } = {}) {
   const enc = {
     id, a: a.owner, b: b.owner, names: { [a.owner]: a.name, [b.owner]: b.name },
     created: new Date(now).toISOString(), status: 'open', guest,
+    // Two cards of one person: allowed as a labelled last resort, and every screen says so.
+    same_person: Boolean(a.same_person_as === b.owner || b.same_person_as === a.owner || (a.same_person_as && a.same_person_as === b.same_person_as)),
     stageKey: newKey('stk'), sides: { [a.owner]: newSide(), [b.owner]: newSide() },
     findings: [], dropped: [], tries: [], tryStatus: null, thanks: [],
     times: { tap: now, ready: null, first_findings: null, all_findings: null, green: null },

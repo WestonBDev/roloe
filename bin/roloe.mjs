@@ -12,7 +12,7 @@ const { values: opt, positionals: pos } = parseArgs({
   options: {
     url: { type: 'string' }, owner: { type: 'string' }, name: { type: 'string' }, line: { type: 'string' },
     project: { type: 'string' }, json: { type: 'boolean' }, ui: { type: 'boolean' }, all: { type: 'boolean' },
-    wait: { type: 'string' }, port: { type: 'string' }, undo: { type: 'boolean' },
+    wait: { type: 'string' }, port: { type: 'string' }, undo: { type: 'boolean' }, 'same-person-as': { type: 'string' },
   },
 });
 
@@ -29,7 +29,10 @@ const commands = {
     if (!cfg) {
       if (!owner) throw new Error('First time: roloe on --owner <short-name> --name "<Your Name>" --project <dir> [--url <coordinator>]');
       const url = opt.url || DEFAULT_URL;
-      const reg = await api({ url }, 'POST', '/api/owners', { owner, name: opt.name || owner, line: opt.line || '' }, { key: '' });
+      const same = opt['same-person-as'] ? loadConfig(opt['same-person-as']) : null;
+      const reg = await api({ url }, 'POST', '/api/owners', { owner, name: opt.name || owner, line: opt.line || '', ...(same ? { same_person_as: same.owner } : {}) },
+        { key: '', headers: same ? { 'x-roloe-same-person-key': same.key } : {} });
+      if (same) out(`Second card: labelled as the same person as ${same.owner} on every screen.`);
       cfg = { owner: reg.owner, name: opt.name || owner, url, key: reg.key, project: resolve(opt.project || process.cwd()), removed: [] };
       saveConfig(cfg);
       out(`Registered card "${cfg.owner}" at ${url}`);
@@ -159,8 +162,29 @@ const commands = {
     out(`Stopped ${e.id} with ${e.with_name}: key revoked, ${r.deleted} shared copies deleted, a query with the old key returns ${r.query_after_stop}.`);
   },
 
+  // One command for a new participant: put the card on, then connect whichever assistants are installed.
+  async join() {
+    await commands.on();
+    const { spawnSync } = await import('node:child_process');
+    const { fileURLToPath } = await import('node:url');
+    const bin = fileURLToPath(import.meta.url);
+    const has = (cmd) => spawnSync('sh', ['-c', `command -v ${cmd}`], { stdio: 'ignore' }).status === 0;
+    const added = [];
+    if (has('claude')) {
+      const r = spawnSync('claude', ['mcp', 'add', '--scope', 'user', 'roloe', '--', 'node', bin, 'mcp'], { encoding: 'utf8' });
+      added.push(r.status === 0 ? 'Claude Code' : `Claude Code (already set up or failed: ${(r.stderr || '').trim().slice(0, 80)})`);
+    }
+    if (has('codex')) {
+      const r = spawnSync('codex', ['mcp', 'add', 'roloe', '--', 'node', bin, 'mcp'], { encoding: 'utf8' });
+      added.push(r.status === 0 ? 'Codex' : `Codex (already set up or failed: ${(r.stderr || '').trim().slice(0, 80)})`);
+    }
+    out(added.length ? `Connected: ${added.join(', ')}.` : 'No Claude Code or Codex found on PATH; connect any MCP client to: node ' + bin + ' mcp');
+    out('Now open your assistant in your project and say: "Call roloe_wait_for_tap, then follow its instructions; repeat."');
+  },
+
   async help() {
-    out(`roloe on --owner <name> --name "<Name>" --project <dir> [--url <coordinator>]
+    out(`roloe join --url <coordinator> --owner <name> --name "<Name>" --project <dir>   (on + connect Claude Code / Codex)
+roloe on --owner <name> --name "<Name>" --project <dir> [--url <coordinator>] [--same-person-as <your first card>]
 roloe off | refresh | show [--all|--json] | private <passage_id> [--undo] | me
 roloe tap <name> | inbox | try [<meeting>] [--project <dir>] | stop [<meeting>] | canary | mcp`);
   },

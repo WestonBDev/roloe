@@ -14,7 +14,7 @@ let view = null;
 let firstSeen = Date.now();
 
 function title(v) {
-  $('#title').textContent = `${v.my_name} ↔ ${v.their_name}`;
+  $('#title').innerHTML = `${esc(v.my_name)} ↔ ${esc(v.their_name)}${v.same_person ? ' <span class="label rec">same person, two projects</span>' : ''}`;
   $('#when').textContent = hhmm(v.created);
   document.title = `Roloe · ${v.their_name}`;
   $('#consent').textContent = v.guest

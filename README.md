@@ -60,7 +60,15 @@ npm start               # http://localhost:7420
 
 Set `ROLOE_PUBLIC_URL` to the address phones will use, or the QR codes point at localhost. Without `ELASTIC_URL` the coordinator uses the in-memory store behind the same interface (and says so in its log).
 
-### Put your card on it (each person, on their own laptop)
+### Join in one command (any second person, Claude Code or Codex)
+
+```bash
+git clone https://github.com/WestonBDev/roloe ~/roloe && cd ~/roloe && npm ci && node bin/roloe.mjs join --url http://<coordinator> --owner <short-name> --name "<Your Name>" --project <path to today's project>
+```
+
+`join` turns your card on and connects whichever of Claude Code and Codex is installed (`claude mcp add --scope user roloe …`, `codex mcp add roloe …`). Then, in your assistant: *"Call roloe_wait_for_tap, then follow its instructions; repeat."*
+
+### Or step by step: put your card on it (each person, on their own laptop)
 
 ```bash
 git clone https://github.com/WestonBDev/roloe ~/roloe && cd ~/roloe && npm ci
@@ -126,6 +134,13 @@ set -a; . ~/roloe-elastic/es.env; set +a; npm test  # also runs the store contra
 | `/me/<owner>#<key>` | Card owner | The switch, totals, every shared passage with Keep private |
 | `/dashboard` | Anyone | Meetings, help that worked, nothing strong, declined, failed, medians, canaries in telemetry |
 | `/c/<owner>` | Print | 85 × 55 mm card, front and back with QR |
+
+## Fallbacks, all labelled
+
+- **Any second person.** `roloe join` works for anyone with Claude Code or Codex, not one particular partner.
+- **No second person.** A judge's zero-install tap (`/g/<owner>`: paste a link, a finding lands, then the extraction attempt) runs live with only the owner enrolled.
+- **Recorded.** Every meeting keeps its record (times, findings, Try it result). The stage replays one on its own real clock with `&replay=1`, or switches to one automatically at 1:40 with `&recorded=<id>&rk=<stage key>`; either way the screen says **Recorded HH:MM**.
+- **Same person, two projects.** As a last resort, `roloe on --owner <you>-two --project <other project> --same-person-as <you>` makes a second card. It needs your first card's key, and every screen labels the pair "same person, two projects".
 
 ## Live and recorded
 
