@@ -8,6 +8,8 @@ import { trace, context, SpanStatusCode } from '@opentelemetry/api';
 import { TracerProvider, SimpleSpanProcessor, BatchSpanProcessor } from '@opentelemetry/sdk-trace';
 import { resourceFromAttributes } from '@opentelemetry/resources';
 import { OTLPTraceExporter } from '@opentelemetry/exporter-trace-otlp-http';
+import { LoggerProvider, SimpleLogRecordProcessor, BatchLogRecordProcessor } from '@opentelemetry/sdk-logs';
+import { OTLPLogExporter } from '@opentelemetry/exporter-logs-otlp-http';
 import { config } from './env.mjs';
 
 const ExportOk = { code: 0 };
@@ -56,14 +58,45 @@ if (otlpOn) {
   }));
 }
 
-export const provider = new TracerProvider({
-  resource: resourceFromAttributes({
-    'service.name': process.env.OTEL_SERVICE_NAME || 'roloe-coordinator',
-    'service.version': '0.1.0',
-    'deployment.environment.name': process.env.ROLOE_ENVIRONMENT || 'hackathon',
-  }),
-  spanProcessors: processors,
+const resource = resourceFromAttributes({
+  'service.name': process.env.OTEL_SERVICE_NAME || 'roloe-coordinator',
+  'service.version': '0.1.0',
+  'deployment.environment.name': process.env.ROLOE_ENVIRONMENT || 'hackathon',
 });
+export const provider = new TracerProvider({ resource, spanProcessors: processors });
+
+// Logs: meeting events as OpenTelemetry log records, each carrying the trace and span it happened
+// in, so Dash0 opens the trace from the log line. JSONL locally (always), OTLP when configured.
+export const logFile = traceFile.replace(/traces\.jsonl$/, 'logs.jsonl').replace(/^(?!.*logs\.jsonl$)(.*)$/, '$1.logs.jsonl');
+class JsonlLogExporter {
+  constructor(file) { this.file = file; mkdirSync(dirname(file), { recursive: true }); }
+  export(records, done) {
+    try {
+      appendFileSync(this.file, records.map((r) => JSON.stringify({
+        time: hrToMs(r.hrTime), severity: r.severityText, body: r.body,
+        traceId: r.spanContext?.traceId, spanId: r.spanContext?.spanId, attributes: r.attributes,
+      })).join('\n') + '\n');
+      done(ExportOk);
+    } catch (e) { done({ code: 1, error: e }); }
+  }
+  shutdown() { return Promise.resolve(); }
+  forceFlush() { return Promise.resolve(); }
+}
+const logProcessors = [new SimpleLogRecordProcessor({ exporter: new JsonlLogExporter(logFile) })];
+if (otlpOn) {
+  const base = config.otlpEndpoint.replace(/\/$/, '').replace(/\/v1\/traces$/, '');
+  logProcessors.push(new BatchLogRecordProcessor({ exporter: new OTLPLogExporter({ url: `${base}/v1/logs`, headers: otlpHeaders() }), scheduledDelayMillis: 1000 }));
+}
+export const loggerProvider = new LoggerProvider({ resource, processors: logProcessors });
+const logger = loggerProvider.getLogger('roloe', '0.1.0');
+
+// The only log bodies there are. A fixed list, so a guest's words can never become a log line.
+const LOG_EVENTS = new Set([
+  'meeting.started', 'meeting.instant_shown', 'meeting.findings_posted', 'meeting.nothing_strong',
+  'meeting.stopped', 'meeting.expired', 'meeting.failed', 'guest.input_read', 'guest.input_failed',
+  'guest_try.state', 'http.server_error',
+]);
+const SEVERITY = { DEBUG: 5, INFO: 9, WARN: 13, ERROR: 17 };
 export const tracer = provider.getTracer('roloe', '0.1.0');
 
 // Per-encounter HMAC keys live in memory only and are destroyed when the encounter stops.
@@ -141,7 +174,7 @@ export function requestSpan(method, route) {
   });
 }
 
-export async function flush() { await provider.forceFlush(); }
+export async function flush() { await provider.forceFlush(); await loggerProvider.forceFlush(); }
 
 // A child span of whatever step is running (or a root span if none), for dependency calls.
 export async function childSpan(name, attrs, fn) {
@@ -158,4 +191,15 @@ export async function childSpan(name, attrs, fn) {
     span.end();
     throw e;
   }
+}
+
+// One meeting event. Inside a step it is that step's log; otherwise the meeting's root span's.
+export function logEvent(event, { ref, severity = 'INFO', attrs = {} } = {}) {
+  if (!LOG_EVENTS.has(event)) throw new Error(`unknown log event: ${String(event).slice(0, 40)}`);
+  const inStep = als.getStore()?.span;
+  const ctx = inStep ? trace.setSpan(context.active(), inStep) : parentContext(ref);
+  logger.emit({
+    eventName: event, body: event, severityText: severity, severityNumber: SEVERITY[severity] || 9, context: ctx,
+    attributes: { ...(ref?.encounterId ? { 'roloe.encounter_id': ref.encounterId } : {}), ...clean(attrs) },
+  });
 }

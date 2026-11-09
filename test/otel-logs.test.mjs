@@ -35,3 +35,21 @@ test('a log inside a step carries that step\'s span; outside, the meeting\'s roo
 test('only known event names are logged, so free text can never become a log body', async () => {
   assert.throws(() => logEvent('the guest said something private', {}), /unknown log event/);
 });
+
+test('a guest meeting leaves started, input-read and stopped logs on its trace, none with their words', async () => {
+  const { startTestServer, twoCards, waitReady } = await import('./helpers.mjs');
+  const s = await startTestServer();
+  try {
+    await twoCards(s);
+    const words = 'my card watcher marks the refresh done before the push actually succeeds';
+    const g = (await s.call('POST', '/api/g/wes/start', { text: words })).body;
+    await waitReady(s, g.id, g.key);
+    await s.call('POST', `/api/e/${g.id}/stop?k=${g.key}`, {});
+    await flush();
+    const mine = read().filter((l) => l.attributes['roloe.encounter_id'] === g.id);
+    const names = mine.map((l) => l.body);
+    for (const n of ['guest.input_read', 'meeting.started', 'meeting.instant_shown', 'meeting.stopped']) assert.ok(names.includes(n), `${n} in ${names}`);
+    assert.equal(new Set(mine.map((l) => l.traceId)).size, 1, 'one meeting, one trace');
+    assert.ok(!JSON.stringify(mine).includes('watcher'), 'no guest words in any log');
+  } finally { await s.close(); }
+});
