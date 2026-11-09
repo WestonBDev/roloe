@@ -126,3 +126,16 @@ export function replayEndMs(rec) {
   const times = [...Object.values(rec.live || {}), ...Object.values(rec.sides || {}).map((x) => x.posted_ms)].filter((x) => x != null);
   return (times.length ? Math.max(...times) : 0) + 3000;
 }
+
+// What the stage clock shows. Live: time since the tap, stopped green at Try it passed.
+// Fallback (live still running past the cutoff, recorded run on screen): the live clock keeps running and is never green.
+// Replay: the recorded meeting's own clock, green at its own Try it passed.
+export function stageClock({ mode, liveElapsedMs = 0, replayElapsedMs = 0, live, view }) {
+  if (mode === 'replay') {
+    const g = view.live.green_ms;
+    return g != null ? { ms: g, green: true } : { ms: replayElapsedMs, green: false };
+  }
+  if (mode === 'fallback') return { ms: liveElapsedMs, green: false };
+  const g = live.live.green_ms;
+  return g != null ? { ms: g, green: true } : { ms: liveElapsedMs, green: false };
+}
