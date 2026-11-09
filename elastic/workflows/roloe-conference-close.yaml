@@ -1,0 +1,59 @@
+# Roloe: when the conference day ends, shared copies are deleted.
+# Applied by scripts/elastic-setup.mjs (POST/PUT <kibana>/api/workflows). Schema: GET /api/workflows/schema?loose=false.
+# There is no dedicated delete_by_query step type on this stack, so both steps use elasticsearch.request.
+version: "1"
+name: roloe-conference-close
+description: >-
+  Deletes shared passage copies more than 12 hours old (a person's own card, encounter_id "card:<owner>",
+  is never touched), then marks meetings that started more than 12 hours ago as stopped.
+enabled: true
+tags:
+  - roloe
+  - privacy
+consts:
+  passages_index: roloe-passages
+  meetings_index: roloe-meetings
+triggers:
+  - type: scheduled
+    with:
+      rrule:
+        freq: DAILY
+        interval: 1
+        tzid: UTC
+        byhour: [2]
+        byminute: [0]
+  - type: manual
+steps:
+  - name: delete_shared_copies
+    type: elasticsearch.request
+    with:
+      method: POST
+      path: "/{{ consts.passages_index }}/_delete_by_query?conflicts=proceed&refresh=true"
+      body:
+        query:
+          bool:
+            filter:
+              - range:
+                  shared_at:
+                    lt: now-12h
+            must_not:
+              - prefix:
+                  encounter_id: "card:"
+  - name: mark_meetings_stopped
+    type: elasticsearch.request
+    with:
+      method: POST
+      path: "/{{ consts.meetings_index }}/_update_by_query?conflicts=proceed&refresh=true"
+      body:
+        query:
+          bool:
+            filter:
+              - range:
+                  started_at:
+                    lt: now-12h
+            must_not:
+              - term:
+                  stopped: true
+        script:
+          lang: painless
+          source: "ctx._source.stopped = true"

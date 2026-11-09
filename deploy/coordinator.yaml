@@ -63,6 +63,13 @@ spec:
             # Created by scripts/k8s-secrets.sh from the git-ignored .env; values never enter git.
             - secretRef: { name: roloe-elastic, optional: true }
             - secretRef: { name: roloe-otel, optional: true }
+          # From Radar's AI investigation of the Recreate outage: the gap is dominated by new-pod
+          # startup (container start, port bind, first readiness pass). Checking every second while
+          # starting marks the pod ready the moment it can serve; readiness then settles at 5 s.
+          startupProbe:
+            httpGet: { path: /healthz, port: http }
+            periodSeconds: 1
+            failureThreshold: 60
           readinessProbe:
             httpGet: { path: /healthz, port: http }
             periodSeconds: 5

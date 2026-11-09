@@ -8,6 +8,7 @@ import { bm25Search } from './text.mjs';
 export function memoryStore({ dataDir } = {}) {
   let docs = [];               // { ...passage, owner_id, owner_name, encounter_id }
   const keys = new Map();      // keyId -> { encounter_id, valid }
+  const meetings = new Map();  // meeting_id -> metadata record (no content)
   const file = dataDir ? join(dataDir, 'memory-store.json') : null;
   let timer = null;
   const writeNow = () => {
@@ -99,6 +100,8 @@ export function memoryStore({ dataDir } = {}) {
       persist();
       return before - docs.length;
     },
+    async recordMeeting(doc) { meetings.set(doc.meeting_id, { ...meetings.get(doc.meeting_id), ...doc }); },
+    async listMeetings() { return [...meetings.values()]; },
     async readsWithRevokedKey(keyId) { const k = keys.get(keyId); return k && k.valid ? docs.filter((d) => d.encounter_id === k.encounter_id).length : 0; },
   };
 }
