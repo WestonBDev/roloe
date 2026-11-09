@@ -29,3 +29,17 @@ test('Try it status: only the recipient reports; passed stops the clock and than
     assert.equal(s.state().encounters[id].times.green, enc.times.green);
   } finally { await s.close(); }
 });
+
+test('the sandbox label in telemetry is a fixed value, never client text (Gitar)', async () => {
+  const s = await startTestServer();
+  try {
+    const { aiden, wes } = await twoCards(s);
+    const { body: { id } } = await s.call('POST', '/api/tap', { to: 'wes' }, aiden);
+    await s.call('POST', `/api/e/${id}/findings`, { findings: [{ cites: 'p-a00001', quote: 'mark the combined total partial', about: 'p-e00001', what: 'w', change: { edits: [{ file: 'a.js', find: 'a', replace: 'b' }] } }] }, aiden);
+    const f = s.state().encounters[id].findings[0];
+    await s.call('POST', `/api/e/${id}/try`, { finding: f.id, state: 'failed', sandbox: 'free text from the client' }, wes);
+    assert.equal(s.state().encounters[id].tryStatus.sandbox, 'other');
+    await s.call('POST', `/api/e/${id}/try`, { finding: f.id, state: 'passed', passed: 1, sandbox: 'docker-network-none' }, wes);
+    assert.equal(s.state().encounters[id].tryStatus.sandbox, 'docker-network-none');
+  } finally { await s.close(); }
+});
