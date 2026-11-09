@@ -1,0 +1,21 @@
+# Argo CD Application: syncs deploy/ from the public repository. No credentials needed.
+#   kubectl apply -n argocd -f deploy/argocd-application.yaml
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: roloe
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/WestonBDev/roloe.git
+    targetRevision: main
+    path: deploy
+    directory:
+      exclude: argocd-application.yaml
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: roloe
+  syncPolicy:
+    automated: { prune: true, selfHeal: true }
+    syncOptions: [CreateNamespace=true]
