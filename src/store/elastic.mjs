@@ -110,6 +110,15 @@ export function elasticStore({ esUrl, esUser, esPassword, esApiKey, esIndex, fet
         info.inference_id = sem?.inference_id || null;
       }
       info.semantic = Boolean(info.inference_id);
+      // Probe once: can this credential mint a scoped key? Then describe() is honest from startup.
+      if (info.scope.startsWith('document-level')) {
+        const probe = await es('POST', '/_security/api_key', {
+          name: 'roloe-mint-probe', expiration: '1m',
+          role_descriptors: { probe: { indices: [{ names: [index], privileges: ['read'], query: { term: { encounter_id: 'probe' } } }] } },
+        }, { allow: [400, 403] });
+        if (probe.status === 200) await es('DELETE', '/_security/api_key', { ids: [probe.json.id] }, { allow: [404] });
+        else { mintRefused = true; info.scope = 'coordinator filter (this cluster refuses to mint scoped keys from an API key)'; }
+      }
     },
     async replaceCard(owner, ownerName, passages) {
       await es('POST', `/${index}/_delete_by_query?refresh=true&conflicts=proceed`, { query: { term: { encounter_id: `card:${owner}` } } });
