@@ -60,8 +60,21 @@ for (const [name, make] of targets) {
       await store.removeFromCard(a, 'p-a00001');
       assert.ok(await store.get(k1.id, 'p-a00001'));
 
+      // Two owners may carry the same passage_id; neither overwrites the other (Gitar).
+      const e3 = `e-${u}000003`;
+      await store.replaceCard(c, 'Cat', [P('p-a00001', 'cat has the same id as ann')]);
+      assert.equal(await store.copyCardsToEncounter(e3, [a, c]), 3);
+      const k3 = await store.createEncounterKey(e3);
+      assert.equal(await store.count(k3.id), 3);
+      assert.equal((await store.get(k3.id, 'p-a00001', c)).owner_id, c);
+      assert.equal((await store.get(k3.id, 'p-a00001', a)).owner_id, a);
+      await store.invalidateKey(k3.id);
+      await store.deleteEncounter(e3);
+      assert.equal(store.scanFor, undefined, 'no unscoped reads in the store interface');
+
       // Stop: invalidate, delete, and the old key reads nothing.
       await store.invalidateKey(k1.id);
+      assert.equal(await store.readsWithRevokedKey(k1.id), 0, 'the store itself refuses the old key');
       await assert.rejects(store.list(k1.id));
       assert.equal(await store.count(k1.id), 0);
       assert.equal(await store.deleteEncounter(e1), 4);
