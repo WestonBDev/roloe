@@ -42,9 +42,9 @@ Zero-install guest meetings against Elastic Cloud Serverless, with Weston's card
 
 | Run set | Public repo (p-retry) | Monorepo folder (next.js `packages/next/src/lib`) | Docs page (nodejs.org) | One sentence | Skip |
 | --- | --- | --- | --- | --- | --- |
-| 1 (11:50) | pass · 14.5 s · nothing strong | pass · 18.7 s · nothing strong | pass · 15.9 s · nothing strong | pass · 14.3 s · 1 finding | pass · 5.9 s · nothing strong |
-| 5 (12:22) | pass · 20.1 s · 2 findings | pass · 29.1 s · 2 findings | pass · 19.1 s · 2 findings | pass · 14.1 s · 3 findings | pass · 16.1 s · 1 finding |
-| 6 (12:31) | pass · 20.1 s · 1 finding | pass · 24.1 s · 1 finding | pass · 19.7 s · 3 findings | pass · 14.0 s · 3 findings | pass · 9.0 s · 1 finding |
+| 1 | pass · 14.5 s · nothing strong | pass · 18.7 s · nothing strong | pass · 15.9 s · nothing strong | pass · 14.3 s · 1 finding | pass · 5.9 s · nothing strong |
+| 5 | pass · 20.1 s · 2 findings | pass · 29.1 s · 2 findings | pass · 19.1 s · 2 findings | pass · 14.1 s · 3 findings | pass · 16.1 s · 1 finding |
+| 6 | pass · 20.1 s · 1 finding | pass · 24.1 s · 1 finding | pass · 19.7 s · 3 findings | pass · 14.0 s · 3 findings | pass · 9.0 s · 1 finding |
 
 Times are from the guest pressing Send to findings on their page. The page opens in 2–16 ms; the meeting is prepared behind it.
 
@@ -56,4 +56,4 @@ What the runs found and fixed (each test-first):
 - An assistant could answer a stale meeting first. Now: oldest unanswered meeting from the last 10 minutes.
 - Privacy: an assistant's prose while answering meetings restates guests' material, and was going onto the owner's card. The indexer now skips it.
 
-Restart while a guest waits: meeting opened, coordinator restarted, then the page and card answered 200, Weston's assistant answered 19 s later, and the guest's page showed 3 findings at the same URL (Elastic Serverless, 12:33).
+Restart while a guest waits: meeting opened, coordinator restarted, then the page and card answered 200, Weston's assistant answered 19 s later, and the guest's page showed 3 findings at the same URL (Elastic Serverless).
