@@ -104,11 +104,12 @@ export function poll(fn, ms) {
 export function replayView(rec, elapsed) {
   const at = (ms) => ms != null && ms <= elapsed;
   const sides = {};
-  const findingsIn = at(rec.live.first_findings_ms);
   for (const [who, s] of Object.entries(rec.sides)) {
     const done = at(s.posted_ms);
+    // Live, a sealed line opens only once the OTHER side has posted.
+    const other = Object.entries(rec.sides).find(([w]) => w !== who)?.[1];
     let seal = null;
-    if (s.seal && at(Date.parse(s.seal.ts) - rec.tap)) seal = { ...s.seal, line: findingsIn ? s.seal.line : null };
+    if (s.seal && at(Date.parse(s.seal.ts) - rec.tap)) seal = { ...s.seal, line: other && at(other.posted_ms) ? s.seal.line : null };
     sides[who] = { ...s, posted: done, posted_ms: done ? s.posted_ms : null, top: done ? s.top : null, more: done ? s.more : 0, nothing_strong: done && s.nothing_strong, seal };
   }
   const live = Object.fromEntries(Object.entries(rec.live).map(([k, v]) => [k, at(v) ? v : null]));
