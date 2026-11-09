@@ -107,10 +107,25 @@ const commands = {
     out(`Stage:     ${r.stage}`);
   },
 
+  // Try a finding's change: literal diff on 127.0.0.1, approve, sandboxed tests.
+  async try() {
+    const cfg = cfgFor();
+    if (opt.project) cfg.project = resolve(opt.project);
+    const id = pos[0] || (await api(cfg, 'GET', '/api/me/encounters')).encounters[0]?.id;
+    if (!id) throw new Error('No meetings yet.');
+    const { startTryUi } = await import('../src/tryit-ui.mjs');
+    const ui = await startTryUi({ cfg, encounterId: id, findingId: pos[1], port: Number(opt.port || 7421) });
+    out(`Try it: ${ui.url}  (change from ${ui.finding.credit.name}, finding ${ui.finding.id})`);
+    if (process.platform === 'darwin' && !process.env.ROLOE_NO_OPEN) (await import('node:child_process')).spawn('open', [ui.url], { stdio: 'ignore', detached: true }).unref();
+    const r = await ui.done;
+    out(r.state === 'passed' ? `Passed: ${r.passed} tests in ${(r.test_ms / 1000).toFixed(1)} s with no network. Your project is unchanged.` : `${r.state}${r.reason ? ': ' + r.reason : ''}`);
+    out('Save the patch from the page if you want it; press Ctrl-C to close.');
+  },
+
   async help() {
     out(`roloe on --owner <name> --name "<Name>" --project <dir> [--url <coordinator>]
 roloe off | refresh | show [--all|--json] | private <passage_id> [--undo] | me
-roloe tap <name> | inbox | mcp`);
+roloe tap <name> | inbox | try [<meeting>] [--project <dir>] | mcp`);
   },
 };
 

@@ -13,7 +13,7 @@ export const normQuote = (s) => String(s || '').toLowerCase().replace(/[‘’]/
 export function safePath(p) {
   const s = String(p || '');
   return Boolean(s) && s.length <= 300 && !s.startsWith('/') && !s.startsWith('~') && !/^[a-zA-Z]:/.test(s)
-    && !s.split(/[\\/]/).some((seg) => seg === '..' || seg === '.git') && !/[\u0000-\u001f]/.test(s);
+    && !s.split(/[\\/]/).some((seg) => seg === '..' || seg === '.git' || seg === '.gitattributes' || seg === '.gitmodules') && !/[\u0000-\u001f]/.test(s);
 }
 
 function cleanChange(change) {
