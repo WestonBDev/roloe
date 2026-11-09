@@ -146,6 +146,16 @@ node bin/roloe.mjs stop                 # end it for both sides
 node bin/roloe.mjs canary               # the judge beat: a fresh secret in a file that is never shared
 ```
 
+### Stay ready for a long session (judging, a booth)
+
+A chat session has to keep calling `roloe_wait_for_tap`, and it can stop or sit on a permission prompt. For hours of scans, run this on your laptop instead:
+
+```bash
+caffeinate -dims node bin/roloe.mjs answer
+```
+
+For each new meeting on your card it starts your own Claude Code headless (your login, this laptop, at most 3 at once), told to answer that one meeting with the Roloe tools and stop. It also serves guest Try it, so keep Docker running. Guests see your assistant as online while it runs. Use it instead of a waiting chat session, not beside one.
+
 ### Deploy on the Radar cluster (Argo CD)
 
 Every push to `main` builds the image (`.github/workflows/deploy.yaml`, to `ghcr.io/westonbdev/roloe`) and pins it in `deploy/kustomization.yaml`; Argo CD in the team cluster syncs `deploy/` to namespace `team-roloe`, served at https://roloe.cnh.radarhq.io.
