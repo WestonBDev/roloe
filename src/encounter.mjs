@@ -2,7 +2,7 @@
 // encounter's root span. Spans carry IDs, counts and HMACs only.
 import { config } from './env.mjs';
 import { state, save, newId, newKey } from './state.mjs';
-import { startEncounterTrace, step, hmac } from './telemetry.mjs';
+import { startEncounterTrace, endEncounterTrace, destroyHmacKey, step, hmac } from './telemetry.mjs';
 import { computeOverlap } from './overlap.mjs';
 
 export const sideLink = (enc, who) => `${config.publicUrl}/e/${enc.id}?k=${enc.sides[who].key}`;
@@ -25,7 +25,24 @@ export async function createEncounter(store, a, b, { guest = null } = {}) {
   };
   enc.trace = startEncounterTrace(id, { 'roloe.guest': Boolean(guest) });
   const ref = { encounterId: id, ...enc.trace };
+  try {
+    await buildEncounter(store, enc, ref, a, b, guest);
+  } catch (e) {
+    // Leave nothing half-built: no copies, no live key, no open record.
+    if (enc.keyId) await store.invalidateKey(enc.keyId).catch(() => {});
+    await store.deleteEncounter(id).catch(() => {});
+    endEncounterTrace(id, { 'roloe.tap.failed': true, 'error.type': e.code || e.name || 'error' });
+    destroyHmacKey(id);
+    throw e;
+  }
+  // Registered only once it's complete.
   state.encounters[id] = enc;
+  save();
+  return enc;
+}
+
+async function buildEncounter(store, enc, ref, a, b, guest) {
+  const id = enc.id;
 
   await step('roloe.tap', ref, { 'roloe.side_a': hmac(id, a.owner), 'roloe.side_b': hmac(id, b.owner) }, async (span) => {
     const owners = [a.owner, b.owner].filter((o) => !o.startsWith('guest-'));
@@ -49,8 +66,6 @@ export async function createEncounter(store, a, b, { guest = null } = {}) {
     }
   }
   enc.times.ready = Date.now();
-  save();
-  return enc;
 }
 
 // What the inbox shows an owner about an encounter: never the other side's key.
