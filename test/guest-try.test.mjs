@@ -15,7 +15,7 @@ async function guestRepoMeeting(s) {
   const call = async (m, path, body, headers = {}) => { const r = await fetch(base + path, { method: m, headers: { 'content-type': 'application/json', ...headers }, body: body ? JSON.stringify(body) : undefined }); return { status: r.status, body: await r.json().catch(() => ({})) }; };
   const g = (await call('POST', '/api/g/wes/start', { link: 'https://github.com/acme/widgets/tree/main/pkg' })).body;
   for (let i = 0; i < 100 && (await call('GET', `/api/e/${g.id}?k=${g.key}`)).body.status === 'preparing'; i++) await new Promise((r) => setTimeout(r, 20));
-  return { call, g, close: () => srv.close() };
+  return { call, g, base, close: () => srv.close() };
 }
 
 test('guest Try it: job → literal diff on the phone → guest approves → giver runs → green and thanks', async () => {
@@ -68,6 +68,44 @@ test('guest Try it is honest: no tests means "no tests to run", never green; onl
     assert.equal(v.findings[0].try.state, 'no-tests');
     assert.equal(v.times.green, null);
     assert.equal((await call('POST', `/api/e/${g.id}/try-approve?k=${g.key}`, { finding: f })).status, 409, 'nothing to run');
+    m.close();
+  } finally { await s.close(); }
+});
+
+test('the giver\'s runner: clone, apply, literal diff, then the guest\'s own tests with no network', { skip: !(await import('../src/tryit.mjs')).dockerAvailable() && 'docker not available' }, async () => {
+  const { mkdtempSync, writeFileSync, mkdirSync, cpSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  const { execFileSync } = await import('node:child_process');
+  const { runGuestTryOnce } = await import('../src/guest-try.mjs');
+  const src = mkdtempSync(join(tmpdir(), 'roloe-gsrc-'));
+  const git = (...a) => execFileSync('git', ['-C', src, ...a], { stdio: 'ignore' });
+  git('init', '-q'); git('config', 'user.email', 't@example.com'); git('config', 'user.name', 't');
+  mkdirSync(join(src, 'pkg', 'test'), { recursive: true });
+  writeFileSync(join(src, 'pkg', 'package.json'), JSON.stringify({ name: 'pkg', type: 'module', scripts: { test: 'node --test' } }));
+  writeFileSync(join(src, 'pkg', 'retry.js'), 'export const retry = (fn) => fn();\n');
+  writeFileSync(join(src, 'pkg', 'test', 'retry.test.js'), "import { test } from 'node:test';\nimport assert from 'node:assert';\nimport { retry } from '../retry.js';\ntest('retries', () => assert.equal(retry(() => 2), 2));\n");
+  git('add', '.'); git('commit', '-qm', 'init');
+  const clone = async (job, dest) => { cpSync(src, dest, { recursive: true }); };   // stands in for git clone --depth 1 of a public repo
+
+  const s = await startTestServer();
+  try {
+    const { wes } = await twoCards(s);
+    const m = await guestRepoMeeting(s);
+    const { g, call } = m;
+    const base = (await import('node:url')).URL;
+    await call('POST', `/api/e/${g.id}/findings`, { findings: [{ cites: 'p-e00001', quote: 'card watcher records refresh as done', about: 'p-b00001', what: 'w',
+      change: { edits: [{ file: 'pkg/retry.js', find: '(fn) => fn()', replace: '(fn) => { try { return fn(); } catch { return fn(); } }' }] } }] }, wes);
+    const cfg = { url: m.base, key: s.keys.wes, owner: 'wes' };
+    await runGuestTryOnce(cfg, { clone });
+    let v = (await call('GET', `/api/e/${g.id}?k=${g.key}`)).body;
+    assert.equal(v.findings[0].try.state, 'review');
+    assert.match(v.findings[0].try.diff, /^\+export const retry = \(fn\) => \{ try/m);
+    await call('POST', `/api/e/${g.id}/try-approve?k=${g.key}`, { finding: v.findings[0].id });
+    await runGuestTryOnce(cfg, { clone });
+    v = (await call('GET', `/api/e/${g.id}?k=${g.key}`)).body;
+    assert.equal(v.findings[0].try.state, 'passed', JSON.stringify(v.findings[0].try));
+    assert.equal(v.findings[0].try.passed, 1);
     m.close();
   } finally { await s.close(); }
 });
