@@ -67,3 +67,11 @@ test('gate ignores plain-word "secrets" so project vocabulary never blocks', () 
   assert.equal(usableSecret('a@b.co'), true);
   assert.equal(gate('Wishlist and steam totals', ['wishlist', 'steam']).ok, true);
 });
+
+test('scrubbing keeps line numbers: a multi-line match leaves the same number of lines (Gitar)', () => {
+  const pem = '-----BEGIN RSA PRIVATE KEY-----\nMIIEow' + 'x'.repeat(40) + '\nabc\n-----END RSA PRIVATE KEY-----';
+  const text = `line one\n${pem}\nline after`;
+  const out = scrub(text).text;
+  assert.equal(out.split('\n').length, text.split('\n').length);
+  assert.equal(out.split('\n')[5], 'line after');
+});
