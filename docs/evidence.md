@@ -66,3 +66,16 @@ What rehearsing it found and fixed, test-first:
 - MCP servers can start with no `PATH`, so `git` and `docker` were missing inside Weston's assistant's server and the clone failed silently. The server now sets a safe `PATH` at startup.
 - Two runners for one owner (the MCP server and `roloe guest-try`) collided on the same clone. Jobs are now claimed at the coordinator (`preparing`, `installing`); a stale claim expires after two minutes.
 - From Gitar's review: a re-prepared change runs only if its diff equals the one the guest approved; clones are removed after a decline, Stop or restart; the dependency install runs with no capabilities, no privilege gain and a read-only root, with its own package cache.
+
+## Found by Dash0, fixed in a PR
+
+- **Symptom (Dash0):** Dash0's live insights flagged slow Elasticsearch queries on `roloe-coordinator` (p95 about 1.5 s). Agent0's investigation found each meeting firing about 22 separate searches, plus bulks and an msearch, and some setup calls arriving as standalone traces with no parent.
+- **Span:** with each Elasticsearch call a child span of its meeting step (added in #16), the trace showed `roloe.pull` making one `_search` per passage (16) and each `roloe.finding.check` making one or two more.
+- **Fix:** `store.getMany` fetches every passage of a pull, and every citation and "about" of a post, in one request. The guest's link read now starts the meeting's trace instead of being an orphan.
+- **Before → after** (same rehearsal coordinator, Elastic Cloud Serverless, measured from the exported spans):
+
+| Per meeting | Before (4 meetings) | After (3 meetings) |
+| --- | --- | --- |
+| Elasticsearch requests | 25 | 7 |
+| `roloe.pull` p50 / p95 | 662 / 1,362 ms | 153 / 247 ms |
+| `roloe.findings` p50 / p95 | 873 / 2,435 ms | 257 / 281 ms |
