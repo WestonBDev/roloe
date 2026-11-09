@@ -1,3 +1,5 @@
+import { childSpan } from '../telemetry.mjs';
+
 // Elasticsearch store. One index of passages with owner_id and encounter_id.
 // At a tap, both cards are copied into the encounter and an API key is minted with the
 // elastic user's credentials. On a trial/Enterprise license the key's role descriptor carries
@@ -16,7 +18,14 @@ export function elasticStore({ esUrl, esUser, esPassword, esApiKey, esIndex, fet
   let mintRefused = false; // serverless / API-key auth: keys with privileges can't be minted from a key
   const info = { store: 'elasticsearch', license: 'unknown', scope: 'coordinator filter', rrf: 'coordinator', semantic: false, inference_id: null };
 
-  async function es(method, path, body, { auth = basic, ndjson = false, allow = [] } = {}) {
+  // Each request is a span (operation, status, duration; never the body), a child of the meeting
+  // step that made it, so Dash0 shows Elastic's share of every meeting.
+  const opName = (path) => path.split('?')[0].replace(`/${index}`, '').replace(/^\//, '') || 'index';
+  async function es(method, path, body, opts = {}) {
+    return childSpan(`elasticsearch ${method} ${opName(path)}`, { 'db.system.name': 'elasticsearch', 'db.operation.name': opName(path), 'http.request.method': method, 'server.address': new URL(base).hostname },
+      async (span) => { const r = await esRaw(method, path, body, opts); span.setAttribute('http.response.status_code', r.status); return r; });
+  }
+  async function esRaw(method, path, body, { auth = basic, ndjson = false, allow = [] } = {}) {
     const res = await fetchImpl(base + path, {
       method,
       headers: { authorization: auth, 'content-type': ndjson ? 'application/x-ndjson' : 'application/json' },
@@ -187,6 +196,14 @@ export function elasticStore({ esUrl, esUser, esPassword, esApiKey, esIndex, fet
       const k = keyAuth(keyId);
       const hits = await searchAs(keyId, { size: 1, query: scoped(k.encounter_id, [], [{ term: { passage_id: passageId } }, ...(owner ? [{ term: { owner_id: owner } }] : [])]) });
       return hits[0] ? strip(hits[0]) : null;
+    },
+    // Many passages by id in one request (a pull, a post's citations), not one search each.
+    async getMany(keyId, ids) {
+      const k = keyAuth(keyId);
+      const uniq = [...new Set(ids)].slice(0, 200);
+      if (!uniq.length) return [];
+      const hits = await searchAs(keyId, { size: uniq.length * 2, _source: { excludes: ['text_semantic'] }, query: scoped(k.encounter_id, [], [{ terms: { passage_id: uniq } }]) });
+      return hits.map(strip);
     },
     async list(keyId, owner) {
       const k = keyAuth(keyId);

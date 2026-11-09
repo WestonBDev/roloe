@@ -26,7 +26,8 @@ export function parseGuestLink(raw) {
     const [owner, repo, mode, ref, ...rest] = u.pathname.replace(/^\/|\/$/g, '').split('/');
     if (owner && repo && /^[\w.-]+$/.test(owner) && /^[\w.-]+$/.test(repo)) {
       if (!mode) return { kind: 'github', owner, repo: repo.replace(/\.git$/, ''), ref: 'HEAD', path: '' };
-      if ((mode === 'tree' || mode === 'blob') && ref) return { kind: 'github', owner, repo, ref, path: rest.join('/') };
+      if (mode === 'tree' && ref) return { kind: 'github', owner, repo, ref, path: rest.join('/') };
+      if (mode === 'blob' && ref && rest.length) return { kind: 'github', owner, repo, ref, path: rest.join('/'), file: true };
     }
   }
   return { kind: 'page', url: u.toString() };
@@ -128,6 +129,13 @@ function chunkLines(text, source, kind, ts) {
 // Stops at a byte cap, so a huge monorepo can't stall a guest's scan.
 const MAX_TARBALL_BYTES = 60_000_000;
 async function readGithub(g, opts) {
+  // One file: straight from raw.githubusercontent.com, no API and no tarball (works in any monorepo).
+  if (g.file) {
+    const raw = `https://raw.githubusercontent.com/${g.owner}/${g.repo}/${encodeURIComponent(g.ref)}/${g.path.split('/').map(encodeURIComponent).join('/')}`;
+    const { text } = await safeFetch(raw, { ...opts, maxBytes: MAX_FILE_BYTES });
+    const sc = scrub(text);
+    return { passages: chunkLines(sc.text, g.path, 'file', new Date().toISOString()), files: 1, removed: sc.removed.length, repo: `https://github.com/${g.owner}/${g.repo}`, ref: g.ref, path: g.path };
+  }
   const url = `https://codeload.github.com/${g.owner}/${g.repo}/tar.gz/${encodeURIComponent(g.ref === 'HEAD' ? 'HEAD' : g.ref)}`;
   const u = new URL(url);
   const addrs = await opts.lookup(u.hostname, { all: true });

@@ -1,13 +1,13 @@
 # Demo rig
 
-Two laptops, two phones, one coordinator. Each side is labelled honestly on screen.
+One builder, two laptops, two phones, one coordinator. Every card and side is labelled honestly on screen.
 
 | Machine | Runs | Its assistant reads |
 | --- | --- | --- |
-| **A: Weston's Mac** | The coordinator (`http://10.1.0.84:7420` until the Radar cluster is up, then `https://roloe.cnh.radarhq.io`), Weston's Claude Code with Roloe connected | today's Roloe work (`~/dev/roloe`), with off-limits names set |
-| **Weston's iPhone** ("westo"), USB to A | the browser: scans Claire's card | nothing; it's a phone |
-| **B: Claire's laptop** | Claude Code or Codex with Roloe connected (`roloe join`) | one clean, public-safe project folder only, never a whole monorepo |
-| **Google Pixel**, USB to B | the browser: scans Weston's card | nothing; it's a phone |
+| **A: Weston's Mac** | Weston's Claude Code with Roloe connected (the coordinator runs on the Radar cluster at `https://roloe.cnh.radarhq.io`) | today's Roloe work (`~/dev/roloe`), with off-limits terms set |
+| **The first phone**, USB to A | the browser: scans the second card | nothing; it's a phone |
+| **B: the second laptop** | a second Roloe card (labelled as a second card, or "same person, two projects") with Claude Code or Codex connected (`roloe join`) | one clean, public-safe example project folder only, never a whole monorepo |
+| **The second phone** (Android), USB to B | the browser: scans Weston's card as a guest | nothing; it's a phone |
 
 ## Setup (once per laptop)
 
@@ -28,18 +28,18 @@ Show each card's QR full screen: `<coordinator URL>/q/<short-name>`.
 
 The Radar URL is the primary route once the cluster is up; these are the USB fallbacks.
 
-- **iPhone on A (Personal Hotspot over USB).** Turn on Personal Hotspot with the iPhone plugged into A. A joins the phone's network on `172.20.10.x` (`ifconfig | grep 172.20.10`). The phone opens `http://172.20.10.<A's address>:7420/g/<name>`.
-- **Pixel on B (`adb reverse`).** `adb reverse` makes the Pixel's `localhost:7420` reach B, but the coordinator runs on A. So on B, forward first, then reverse:
+- **An iPhone on A (Personal Hotspot over USB).** Turn on Personal Hotspot with the iPhone plugged into A. A joins the phone's network on `172.20.10.x` (`ifconfig | grep 172.20.10`). The phone opens `http://172.20.10.<A's address>:7420/g/<name>`.
+- **An Android phone on B (`adb reverse`).** `adb reverse` makes the phone's `localhost:7420` reach B; if the coordinator runs on A instead of the cluster, forward B to it first. So on B, forward first, then reverse:
   ```bash
   node ~/roloe/scripts/forward.mjs 7420 10.1.0.84:7420   # B's localhost:7420 → A
-  adb reverse tcp:7420 tcp:7420                          # Pixel's localhost:7420 → B
+  adb reverse tcp:7420 tcp:7420                          # the phone's localhost:7420 → B
   ```
-  The Pixel opens `http://localhost:7420/g/<name>` (typed or from a bookmark: the QR encodes the public URL, not localhost).
+  The phone opens `http://localhost:7420/g/<name>` (typed or from a bookmark: the QR encodes the public URL, not localhost).
 
 ## 60-second preflight
 
-1. On A: `curl -s http://10.1.0.84:7420/healthz` shows `{"ok":true,"otlp":true}`.
+1. `curl -s https://roloe.cnh.radarhq.io/healthz` shows `"ok":true`.
 2. From each phone: open `<coordinator URL>/healthz` (or the USB address above). It must show `ok`.
 3. On B: `curl -s <coordinator URL>/healthz` (laptop to laptop).
-4. One scan each way: the iPhone scans Claire's `/q/<name>`, the Pixel scans Weston's `/q/weston`. Type one sentence, Send. A finding or an honest "nothing strong" arrives within about a minute.
+4. One scan each way: the first phone scans the second card's `/q/<name>`, the second phone scans `/q/weston`. Type one sentence, Send. A finding or an honest "nothing strong" arrives within about a minute.
 5. The stage: open the meeting's stage link (from `roloe inbox`) full screen; a judge QR sits in the corner.

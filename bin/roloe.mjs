@@ -196,12 +196,24 @@ const commands = {
     out(`${cfg.offLimits.length} off-limits terms${cfg.offLimits.length ? ': ' + cfg.offLimits.join(', ') : ''}`);
   },
 
+  // Serve guest Try it from this laptop (the MCP server does this too while your assistant waits).
+  async ['guest-try']() {
+    const cfg = cfgFor();
+    const { runGuestTryOnce, cleanupGuestTries } = await import('../src/guest-try.mjs');
+    out('Serving guest Try it from this laptop. Ctrl-C to stop.');
+    process.on('SIGINT', () => { cleanupGuestTries(); process.exit(0); });
+    for (;;) {
+      try { await runGuestTryOnce(cfg); } catch (e) { out(`(retrying: ${e.message})`); }
+      await new Promise((r) => setTimeout(r, 2000));
+    }
+  },
+
   async help() {
     out(`roloe join --url <coordinator> --owner <name> --name "<Name>" --project <dir>   (on + connect Claude Code / Codex)
 roloe on --owner <name> --name "<Name>" --project <dir> [--url <coordinator>] [--same-person-as <your first card>]
 roloe off | refresh | show [--all|--json] | private <passage_id> [--undo] | me
 roloe tap <name> | inbox | try [<meeting>] [--project <dir>] | stop [<meeting>] | canary | mcp
-roloe off-limits list | add <term>... | remove <term>...`);
+roloe off-limits list | add <term>... | remove <term>... | guest-try`);
   },
 };
 

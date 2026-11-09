@@ -6,13 +6,13 @@ import { join } from 'node:path';
 import { startTestServer, twoCards, waitReady } from './helpers.mjs';
 
 const sha = (s) => createHash('sha256').update(s).digest('hex');
-const good = { cites: 'p-a00001', quote: 'mark the combined total partial', about: 'p-e00001', what: 'Aiden marks totals partial.' };
+const good = { cites: 'p-a00001', quote: 'mark the combined total partial', about: 'p-e00001', what: 'Maya marks totals partial.' };
 
 async function meeting(s) {
   const cards = await twoCards(s);
-  const tap = await s.call('POST', '/api/tap', { to: 'wes' }, cards.aiden);
+  const tap = await s.call('POST', '/api/tap', { to: 'wes' }, cards.maya);
   const enc = s.state().encounters[tap.body.id];
-  const k = { aiden: enc.sides.aiden.key, wes: enc.sides.wes.key };
+  const k = { maya: enc.sides.maya.key, wes: enc.sides.wes.key };
   return { ...cards, id: tap.body.id, k, stage: enc.stageKey };
 }
 
@@ -26,31 +26,31 @@ test('sealed lines: commit a hash, reveal only a matching line, the other side s
     const sealed = await s.call('POST', `/api/e/${id}/seal?k=${k.wes}`, { hash: sha(`${nonce}|${line}`) });
     assert.equal(sealed.status, 200);
     assert.equal((await s.call('POST', `/api/e/${id}/seal?k=${k.wes}`, { hash: sha('x') })).status, 409, 'one seal per side');
-    await s.call('POST', `/api/e/${id}/seal?k=${k.aiden}`, { skipped: true });
-    let aidenView = (await s.call('GET', `/api/e/${id}?k=${k.aiden}`)).body;
-    assert.equal(aidenView.seal.theirs.hash, sha(`${nonce}|${line}`));
-    assert.equal(aidenView.seal.theirs.line, null);
-    assert.equal(aidenView.seal.mine.skipped, true);
+    await s.call('POST', `/api/e/${id}/seal?k=${k.maya}`, { skipped: true });
+    let mayaView = (await s.call('GET', `/api/e/${id}?k=${k.maya}`)).body;
+    assert.equal(mayaView.seal.theirs.hash, sha(`${nonce}|${line}`));
+    assert.equal(mayaView.seal.theirs.line, null);
+    assert.equal(mayaView.seal.mine.skipped, true);
     assert.equal((await s.call('POST', `/api/e/${id}/reveal?k=${k.wes}`, { line: 'something else', nonce })).status, 400);
     assert.equal((await s.call('POST', `/api/e/${id}/reveal?k=${k.wes}`, { line, nonce })).status, 200);
-    aidenView = (await s.call('GET', `/api/e/${id}?k=${k.aiden}`)).body;
-    assert.equal(aidenView.seal.theirs.line, line);
+    mayaView = (await s.call('GET', `/api/e/${id}?k=${k.maya}`)).body;
+    assert.equal(mayaView.seal.theirs.line, line);
   } finally { await s.close(); }
 });
 
 test('stage view: both names, hashes, top finding per side, Prepared before and Read live numbers; stage key only', async () => {
   const s = await startTestServer();
   try {
-    const { id, k, stage, aiden, wes } = await meeting(s);
+    const { id, k, stage, maya, wes } = await meeting(s);
     assert.equal((await s.call('GET', `/api/e/${id}/stage?k=${k.wes}`)).status, 401);
-    await s.call('POST', `/api/e/${id}/findings`, { findings: [good, { ...good, quote: 'then retry the push' }] }, aiden);
+    await s.call('POST', `/api/e/${id}/findings`, { findings: [good, { ...good, quote: 'then retry the push' }] }, maya);
     await s.call('POST', `/api/e/${id}/findings`, { nothing_strong: true }, wes);
     const st = (await s.call('GET', `/api/e/${id}/stage?k=${stage}`)).body;
-    assert.deepEqual(st.names, { aiden: 'Aiden', wes: 'Wes' });
-    assert.equal(st.sides.aiden.top.quote, good.quote);
-    assert.equal(st.sides.aiden.more, 1);
+    assert.deepEqual(st.names, { maya: 'Maya', wes: 'Wes' });
+    assert.equal(st.sides.maya.top.quote, good.quote);
+    assert.equal(st.sides.maya.more, 1);
     assert.equal(st.sides.wes.nothing_strong, true);
-    assert.equal(st.prepared.aiden.passages, 2);
+    assert.equal(st.prepared.maya.passages, 2);
     assert.ok(st.live.ready_ms >= 0);
     assert.ok(st.live.first_findings_ms >= 0);
     assert.match(st.scope, /coordinator filter|document-level/);
@@ -61,16 +61,16 @@ test('stage view: both names, hashes, top finding per side, Prepared before and 
 test('stop: key invalidated, copies deleted, a query with the old key returns 0, nothing more can be read', async () => {
   const s = await startTestServer();
   try {
-    const { id, k, aiden } = await meeting(s);
+    const { id, k, maya } = await meeting(s);
     const keyId = s.state().encounters[id].keyId;
     assert.equal(await s.store.count(keyId), 4);
     const stop = await s.call('POST', `/api/e/${id}/stop?k=${k.wes}`);
     assert.equal(stop.status, 200);
     assert.deepEqual({ deleted: stop.body.deleted, after: stop.body.query_after_stop }, { deleted: 4, after: 0 });
     assert.equal(await s.store.count(keyId), 0);
-    assert.equal((await s.call('GET', `/api/e/${id}/pull`, null, aiden)).status, 410);
-    assert.equal((await s.call('POST', `/api/e/${id}/findings`, { findings: [good] }, aiden)).status, 410);
-    const view = (await s.call('GET', `/api/e/${id}?k=${k.aiden}`)).body;
+    assert.equal((await s.call('GET', `/api/e/${id}/pull`, null, maya)).status, 410);
+    assert.equal((await s.call('POST', `/api/e/${id}/findings`, { findings: [good] }, maya)).status, 410);
+    const view = (await s.call('GET', `/api/e/${id}?k=${k.maya}`)).body;
     assert.equal(view.status, 'closed');
     assert.equal(view.closed.by, 'wes');
     const { flush } = await import('../src/telemetry.mjs');
@@ -142,8 +142,8 @@ test('the judge\'s extraction attempt: scope finds nothing, a secret-shaped requ
 test('dashboard counts every meeting, including nothing strong, declined and failed', async () => {
   const s = await startTestServer();
   try {
-    const { id, aiden, wes } = await meeting(s);
-    await s.call('POST', `/api/e/${id}/findings`, { findings: [{ ...good, change: { edits: [{ file: 'a.js', find: 'a', replace: 'b' }] } }] }, aiden);
+    const { id, maya, wes } = await meeting(s);
+    await s.call('POST', `/api/e/${id}/findings`, { findings: [{ ...good, change: { edits: [{ file: 'a.js', find: 'a', replace: 'b' }] } }] }, maya);
     await s.call('POST', `/api/e/${id}/findings`, { nothing_strong: true }, wes);
     const f = s.state().encounters[id].findings[0];
     await s.call('POST', `/api/e/${id}/try`, { finding: f.id, state: 'passed', passed: 3, failed: 0, test_ms: 900 }, wes);
@@ -162,7 +162,7 @@ test('hardening: simultaneous stops agree, a failing stop proof still closes, gu
   const s = await startTestServer();
   try {
     const { id, k } = await meeting(s);
-    const [a, b] = await Promise.all([s.call('POST', `/api/e/${id}/stop?k=${k.wes}`), s.call('POST', `/api/e/${id}/stop?k=${k.aiden}`)]);
+    const [a, b] = await Promise.all([s.call('POST', `/api/e/${id}/stop?k=${k.wes}`), s.call('POST', `/api/e/${id}/stop?k=${k.maya}`)]);
     assert.equal(a.body.deleted, 4);
     assert.equal(b.body.deleted, 4, 'the second stop reports the same receipt, not deleted: 0');
 
@@ -183,9 +183,9 @@ test('hardening: simultaneous stops agree, a failing stop proof still closes, gu
 });
 
 async function meeting2(s) {
-  const { body: { id } } = await s.call('POST', '/api/tap', { to: 'wes' }, { authorization: `Bearer ${s.keys.aiden}` });
+  const { body: { id } } = await s.call('POST', '/api/tap', { to: 'wes' }, { authorization: `Bearer ${s.keys.maya}` });
   const enc = s.state().encounters[id];
-  return { id, k: { aiden: enc.sides.aiden.key, wes: enc.sides.wes.key } };
+  return { id, k: { maya: enc.sides.maya.key, wes: enc.sides.wes.key } };
 }
 
 test('the dashboard scans telemetry incrementally, not the whole file on every request (Gitar)', async () => {

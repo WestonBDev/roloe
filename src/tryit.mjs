@@ -70,8 +70,14 @@ export function parseCounts(out) {
 // Green: exit 0 and at least one test ran. A suite that runs nothing proves nothing.
 export const verdict = (code, counts) => (code === 0 && counts.passed > 0 && !counts.failed ? 'passed' : 'failed');
 
+// MCP servers can start with a bare environment: make sure git and docker are still found.
+export function toolPath() {
+  const extra = ['/opt/homebrew/bin', '/usr/local/bin', '/usr/bin', '/bin', '/usr/sbin', '/sbin', join(homedir(), '.colima', 'bin')];
+  return [...new Set([...(process.env.PATH || '').split(':').filter(Boolean), ...extra])].join(':');
+}
+
 export function dockerEnv() {
-  const env = { PATH: process.env.PATH, HOME: homedir() };
+  const env = { PATH: toolPath(), HOME: homedir() };
   const colima = join(homedir(), '.colima', 'default', 'docker.sock');
   env.DOCKER_HOST = process.env.DOCKER_HOST || (existsSync(colima) ? `unix://${colima}` : undefined);
   // A leftover Docker Desktop credsStore breaks every pull; use a clean client config.
@@ -124,7 +130,14 @@ export function plan(dir) {
   return null;
 }
 
-export async function runSandboxed(dir, { onState = () => {}, onOutput = () => {}, testTimeoutMs = 120000, keepCopy = false } = {}) {
+// The dependency install keeps the network (it fetches from the lockfile) but is otherwise as
+// locked down as the test run: no capabilities, no privilege gain, read-only root, this user.
+export function installArgs({ dir, cacheDir, image, cmd, user, name, cacheMount, cacheEnv }) {
+  return ['run', '--rm', '--name', name, '--user', user, '--cap-drop', 'ALL', '--security-opt', 'no-new-privileges', '--read-only', '--tmpfs', '/tmp:exec',
+    '-v', `${dir}:/w`, '-v', `${cacheDir}:${cacheMount}`, '-w', '/w', '-e', 'HOME=/tmp', '-e', `${cacheEnv}=${cacheMount}`, image, 'sh', '-c', cmd];
+}
+
+export async function runSandboxed(dir, { onState = () => {}, onOutput = () => {}, testTimeoutMs = 120000, keepCopy = false, cacheDir: ownCacheDir = null } = {}) {
   const started = Date.now();
   // Run as this user, so nothing in the copy ends up owned by root (and the copy can be deleted).
   const user = `${process.getuid?.() ?? 1000}:${process.getgid?.() ?? 1000}`;
@@ -142,9 +155,9 @@ export async function runSandboxed(dir, { onState = () => {}, onOutput = () => {
     }
     if (p.install) {
       // Dependencies from the lockfile, with network, in Linux (a macOS node_modules won't run here).
-      const cacheDir = join(homedir(), '.cache', 'roloe', 'pkg-cache');
+      const cacheDir = ownCacheDir || join(homedir(), '.cache', 'roloe', 'pkg-cache');
       mkdirSync(cacheDir, { recursive: true });
-      const r = await docker(['run', '--rm', '--name', `${container}-deps`, '--user', user, '-v', `${dir}:/w`, '-v', `${cacheDir}:${p.cache}`, '-w', '/w', '-e', 'HOME=/tmp', '-e', `${p.cacheEnv}=${p.cache}`, p.image, 'sh', '-c', p.install], { onData: onOutput, name: `${container}-deps` });
+      const r = await docker(installArgs({ dir, cacheDir, image: p.image, cmd: p.install, user, name: `${container}-deps`, cacheMount: p.cache, cacheEnv: p.cacheEnv }), { onData: onOutput, name: `${container}-deps` });
       output += r.out;
       if (r.code !== 0) { onState('failed'); return { state: 'failed', reason: 'dependency install failed', output, passed: null, failed: null, test_ms: 0 }; }
     }
