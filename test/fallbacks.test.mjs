@@ -132,3 +132,15 @@ test('replay opens a sealed line only after the other side posted, as it happens
   assert.equal(replayView(rec, 10000).sides.aiden.seal.line, null, 'Wes has not posted yet at 0:10');
   assert.equal(replayView(rec, 21000).sides.aiden.seal.line, 'aiden expected this');
 });
+
+test('in the 1:40 fallback the live clock keeps running: never green from the recorded run (Gitar)', async () => {
+  const { stageClock } = await import('../src/pages/roloe.js');
+  const recordedView = { live: { green_ms: 26000 } };
+  const liveRunning = { live: { green_ms: null } };
+  const fb = stageClock({ mode: 'fallback', liveElapsedMs: 105000, live: liveRunning, view: recordedView });
+  assert.deepEqual({ ms: fb.ms, green: fb.green }, { ms: 105000, green: false });
+  const liveDone = stageClock({ mode: 'live', liveElapsedMs: 40000, live: { live: { green_ms: 31000 } }, view: { live: { green_ms: 31000 } } });
+  assert.deepEqual({ ms: liveDone.ms, green: liveDone.green }, { ms: 31000, green: true });
+  const rep = stageClock({ mode: 'replay', replayElapsedMs: 27000, live: recordedView, view: { live: { green_ms: 26000 } } });
+  assert.deepEqual({ ms: rep.ms, green: rep.green }, { ms: 26000, green: true });
+});
