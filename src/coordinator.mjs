@@ -218,6 +218,7 @@ export function buildApp({ store, guestReader = readGuestInput, guestReadTimeout
 
   // ---------- The card: one switch, and exactly what is shared ----------
   const cardDigest = new Map();   // owner -> digest of the last card written (memory only)
+  const cardGen = new Map();      // owner -> number of card writes started
   r.add('PUT', '/api/cards/:owner', async ({ req, res, params, span }) => {
     const o = authOwner(req, params.owner);
     if (!o.sharing) throw new HttpError(409, 'switch_off', 'Sharing is off. Turn the switch on first.');
@@ -252,21 +253,29 @@ export function buildApp({ store, guestReader = readGuestInput, guestReadTimeout
     // same passages aren't rewritten and re-embedded every few minutes (that spent the quota).
     const digest = createHash('sha256').update(JSON.stringify([o.name, passages.map(({ ts, ...p }) => p)])).digest('hex');
     const last = cardDigest.get(o.owner);
+    const meta = () => {
+      const t = body.totals || {};
+      o.card = {
+        passages: passages.length,
+        totals: { sessions: +t.sessions || 0, files: +t.files || 0, commits: +t.commits || 0, owner_messages: +t.owner_messages || 0, secrets_removed: (+t.secrets_removed || 0) + rescrubbed },
+        scope: cleanLine(body.scope || '', 80),
+        updated: new Date().toISOString(),
+      };
+    };
     if (last?.digest === digest && Date.now() - last.at < 30 * 60e3 && o.card?.passages === passages.length) {   // rewritten at least every 30 min anyway
+      meta();   // only the store write is skipped: totals, scope and "updated" still move (Gitar)
+      save();
       span.setAttributes({ 'roloe.owner': o.owner, 'roloe.card.passages': passages.length, 'roloe.card.unchanged': true });
       return send(res, 200, { owner: o.owner, passages: passages.length, private: o.private.length, rescrubbed, unchanged: true });
     }
+    // Several assistants upload for one owner: only the latest write started may be remembered (Gitar).
+    const gen = (cardGen.get(o.owner) || 0) + 1;
+    cardGen.set(o.owner, gen);
     cardDigest.delete(o.owner);
     await store.replaceCard(o.owner, o.name, passages);
     if (!o.sharing) { await store.replaceCard(o.owner, o.name, []); throw new HttpError(409, 'switch_off', 'Sharing went off during the upload.'); }
-    const t = body.totals || {};
-    o.card = {
-      passages: passages.length,
-      totals: { sessions: +t.sessions || 0, files: +t.files || 0, commits: +t.commits || 0, owner_messages: +t.owner_messages || 0, secrets_removed: (+t.secrets_removed || 0) + rescrubbed },
-      scope: cleanLine(body.scope || '', 80),
-      updated: new Date().toISOString(),
-    };
-    cardDigest.set(o.owner, { digest, at: Date.now() });
+    meta();
+    if (cardGen.get(o.owner) === gen) cardDigest.set(o.owner, { digest, at: Date.now() });
     save();
     span.setAttributes({ 'roloe.owner': o.owner, 'roloe.card.passages': passages.length, 'roloe.card.rescrubbed': rescrubbed });
     send(res, 200, { owner: o.owner, passages: passages.length, private: o.private.length, rescrubbed });
@@ -277,6 +286,7 @@ export function buildApp({ store, guestReader = readGuestInput, guestReadTimeout
     const { on } = await readJson(req);
     o.sharing = Boolean(on);
     cardDigest.delete(o.owner);
+    cardGen.set(o.owner, (cardGen.get(o.owner) || 0) + 1);   // an upload still in flight must not be remembered
     if (!o.sharing) {
       await store.replaceCard(o.owner, o.name, []);   // off empties the card at once
       o.card = { ...o.card, passages: 0, updated: new Date().toISOString() };
