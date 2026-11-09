@@ -10,7 +10,7 @@
 <link rel="stylesheet" href="/roloe.css">
 <style>
   main.wheel { gap: 14px; }
-  .stack { position: relative; perspective: 1100px; touch-action: pan-y; margin-top: 30px; }
+  .stack { position: relative; perspective: 1100px; touch-action: none; margin-top: 30px; }   /* our swipe, not the page's scroll */
   .stack .card { position: relative; margin-top: 0; transform-origin: 50% 100%; will-change: transform; }
   .stack .card.behind { position: absolute; inset: 0 0 auto 0; height: 120px; pointer-events: none; }
   .stack .card .quote { font-size: 28px; }
