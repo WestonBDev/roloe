@@ -23,7 +23,7 @@ const MEETING_MAPPING = { dynamic: 'strict', properties: {
 export function elasticStore({ esUrl, esUser, esPassword, esApiKey, esIndex, fetchImpl = fetch }) {
   const base = esUrl.replace(/\/$/, '');
   const index = esIndex;
-  const meetingsIndex = `${esIndex}-meetings`;
+  const meetingsIndex = `${esIndex.replace(/-passages$/, '')}-meetings`;   // roloe-passages -> roloe-meetings
   const basic = esApiKey ? `ApiKey ${esApiKey}` : 'Basic ' + Buffer.from(`${esUser}:${esPassword}`).toString('base64');
   const keys = new Map(); // keyId -> { encoded, encounter_id, valid }  (memory only, never persisted)
   let mintRefused = false; // serverless / API-key auth: keys with privileges can't be minted from a key
@@ -152,6 +152,7 @@ export function elasticStore({ esUrl, esUser, esPassword, esApiKey, esIndex, fet
       info.multilingual = Boolean(info.multilingual_inference_id);
       const mi = await es('HEAD', `/${meetingsIndex}`, undefined, { allow: [404] });
       if (mi.status === 404) await es('PUT', `/${meetingsIndex}`, { mappings: MEETING_MAPPING }, { allow: [400] });
+      else await es('PUT', `/${meetingsIndex}/_mapping`, { dynamic: 'strict' }, { allow: [400] });   // created by the setup script: keep it strict
       info.semantic = Boolean(info.inference_id);
       // Probe once: can this credential mint a scoped key? Then describe() is honest from startup.
       if (info.scope.startsWith('document-level') && esApiKey) {   // password auth fails closed at mint time instead

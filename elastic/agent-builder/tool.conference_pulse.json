@@ -1,0 +1,21 @@
+{
+  "id": "roloe.conference_pulse",
+  "type": "esql",
+  "description": "Conference pulse for the organizer. Reads meeting metadata only (index roloe-meetings: no passages, no names, no content). Returns one row per hour for the last `hours_back` hours: meetings, counts by kind (pair, guest, same_person), how many got at least one finding, median seconds to findings, how many reached a passing Try it, and median seconds to help.",
+  "tags": [
+    "roloe",
+    "organizer",
+    "metadata-only"
+  ],
+  "configuration": {
+    "query": "FROM roloe-meetings | WHERE DATE_DIFF(\"minute\", started_at, NOW()) <= ?hours_back * 60 | EVAL hour = DATE_TRUNC(1 hour, started_at) | STATS meetings = COUNT(*), pair = COUNT(*) WHERE kind == \"pair\", guest = COUNT(*) WHERE kind == \"guest\", same_person = COUNT(*) WHERE kind == \"same_person\", with_findings = COUNT(*) WHERE findings_accepted > 0, median_time_to_findings_s = MEDIAN(time_to_findings_s), try_passed = COUNT(*) WHERE try_state == \"passed\", median_time_to_help_s = MEDIAN(time_to_help_s) BY hour | SORT hour ASC | LIMIT 48",
+    "params": {
+      "hours_back": {
+        "type": "integer",
+        "description": "How many hours back from now to include. Defaults to 24 (today).",
+        "optional": true,
+        "defaultValue": 24
+      }
+    }
+  }
+}
