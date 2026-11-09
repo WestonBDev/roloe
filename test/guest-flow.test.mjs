@@ -82,3 +82,38 @@ test('a coordinator restart keeps the card and the guest\'s meeting page working
     assert.equal(pull.body.theirs.length, 1);
   } finally { p.kill('SIGTERM'); }
 });
+
+test('the guest\'s page opens at once; reading and copying happen behind it, and the assistant sees the meeting only when it\'s ready', async () => {
+  const http = await import('node:http');
+  const { buildApp } = await import('../src/coordinator.mjs');
+  const s = await startTestServer();
+  try {
+    const { wes } = await twoCards(s);
+    // A second app on the same store, with a slow reader (a big repo).
+    const slow = buildApp({ store: s.store, guestReader: async (inp) => { await new Promise((r) => setTimeout(r, 1500)); return { kind: 'text', passages: [{ passage_id: 'p-b00009', kind: 'session', speaker: 'owner', source: 'note', locator: 'note', ts: new Date().toISOString(), text: inp.text }], error: null }; } });
+    const srv = http.createServer(slow.handle);
+    await new Promise((r) => srv.listen(0, '127.0.0.1', r));
+    const base = `http://127.0.0.1:${srv.address().port}`;
+    const t0 = Date.now();
+    const res = await fetch(`${base}/api/g/wes/start`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ text: 'card watcher marks refresh done before the push' }) });
+    const g = await res.json();
+    assert.equal(res.status, 201);
+    assert.ok(Date.now() - t0 < 500, `answered in ${Date.now() - t0} ms`);
+    let view = await (await fetch(`${base}/api/e/${g.id}?k=${g.key}`)).json();
+    assert.equal(view.status, 'preparing');
+    assert.equal((await s.call('GET', '/api/me/encounters', null, wes)).body.encounters.length, 0, 'not offered to the assistant yet');
+    await new Promise((r) => setTimeout(r, 2500));
+    view = await (await fetch(`${base}/api/e/${g.id}?k=${g.key}`)).json();
+    assert.equal(view.status, 'open');
+    assert.equal((await s.call('GET', '/api/me/encounters', null, wes)).body.encounters[0].id, g.id);
+    srv.close();
+  } finally { await s.close(); }
+});
+
+test('GitHub refusals become plain words, not status codes', async () => {
+  const { readGuestInput } = await import('../src/guest-input.mjs');
+  const lookup = async () => [{ address: '140.82.112.3', family: 4 }];
+  const r = await readGuestInput({ link: 'https://github.com/acme/private-repo' }, { fetchImpl: async () => new Response('no', { status: 404 }), lookup });
+  assert.match(r.error, /not found|public/i);
+  assert.ok(!/404/.test(r.error));
+});
