@@ -51,3 +51,20 @@ test('serverless: API-key auth, semantic + RRF on, scope falls back to the coord
   assert.equal(await store.count(k.id), 0);
   await assert.rejects(store.list(k.id));
 });
+
+test('with the elastic user\'s password, a refused key mint fails closed instead of downgrading scope (Gitar)', async () => {
+  const fetchImpl = async (url, opts) => {
+    const u = new URL(url);
+    const reply = (status, json) => new Response(JSON.stringify(json), { status });
+    if (u.pathname === '/') return reply(200, { version: { build_flavor: 'default' } });
+    if (u.pathname === '/_license') return reply(200, { license: { type: 'trial', status: 'active' } });
+    if (opts.method === 'HEAD') return reply(200, {});
+    if (u.pathname.endsWith('/_mapping')) return reply(200, { 'roloe-t': { mappings: { properties: {} } } });
+    if (u.pathname === '/_security/api_key') return reply(403, { error: { type: 'security_exception' } });
+    return reply(200, {});
+  };
+  const store = elasticStore({ esUrl: 'https://x.example', esUser: 'elastic', esPassword: 'pw', esIndex: 'roloe-t', fetchImpl });
+  await store.init();
+  await assert.rejects(store.createEncounterKey('e-1'));
+  assert.match(store.describe().scope, /document-level/, 'scope mode unchanged: no silent downgrade');
+});

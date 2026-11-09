@@ -156,7 +156,9 @@ export function elasticStore({ esUrl, esUser, esPassword, esApiKey, esIndex, fet
           keys.set(json.id, { encoded: json.encoded, encounter_id: enc, valid: true });
           return { id: json.id };
         } catch (e) {
-          if (![400, 403].includes(e.status)) throw e;
+          // Only an API-key credential is expected to be refused (Elasticsearch won't derive a
+          // privileged key from one). With the elastic user's password, fail closed: never downgrade.
+          if (!esApiKey || ![400, 403].includes(e.status)) throw e;
           mintRefused = true;
           info.scope = 'coordinator filter (this cluster refuses to mint scoped keys from an API key)';
         }
