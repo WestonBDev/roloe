@@ -17,7 +17,7 @@
     touch-action: none; user-select: none; -webkit-user-select: none; cursor: grab; outline: none; }
   .spin { position: absolute; left: 50%; top: calc(var(--h) + var(--hub) + 40px); width: 0; height: 0; transform-style: preserve-3d; transform: rotateX(-9deg); }
   .leaf { position: absolute; left: calc(var(--w) / -2); top: calc((var(--h) + var(--hub)) * -1); width: var(--w); height: var(--h);
-    transform-origin: 50% calc(var(--h) + var(--hub)); transform-style: preserve-3d; will-change: transform; }
+    transform-origin: 50% calc(var(--h) + var(--hub)); }   /* each card is one flat plane: its tab, paper and shade must not be sorted apart */
   .leaf .ltab { position: absolute; top: -25px; height: 26px; max-width: 46%; padding: 4px 12px 0; border-radius: 8px 8px 0 0; background: var(--stock);
     font: 600 13px/1.5 var(--sans); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; box-shadow: inset 0 -5px 0 rgba(0,0,0,.04); }
   .leaf .ltab:empty { width: 22%; }
