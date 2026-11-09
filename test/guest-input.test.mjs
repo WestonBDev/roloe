@@ -149,3 +149,12 @@ test('a slow tarball start still leaves time for the folder fallback', async () 
   const r = await readGuestInput({ link: 'https://github.com/acme/slow/tree/main/pkg' }, { fetchImpl: f, lookup: publicDns, timeoutMs: 3000 });
   assert.deepEqual(r.passages.map((p) => p.source), ['pkg/a.js']);
 });
+
+test('a GitHub file link is read straight from raw.githubusercontent.com: no API, no tarball', async () => {
+  const calls = [];
+  const f = async (url) => { calls.push(String(url)); return /raw\.githubusercontent\.com\/acme\/huge\/main\/packages\/api\/retry\.js$/.test(String(url)) ? new Response('export const retry = (fn) => fn();\n', { status: 200 }) : new Response('no', { status: 404 }); };
+  const r = await readGuestInput({ link: 'https://github.com/acme/huge/blob/main/packages/api/retry.js' }, { fetchImpl: f, lookup: publicDns });
+  assert.deepEqual(r.passages.map((p) => p.source), ['packages/api/retry.js']);
+  assert.deepEqual(calls, ['https://raw.githubusercontent.com/acme/huge/main/packages/api/retry.js']);
+  assert.equal(r.path, 'packages/api/retry.js');
+});
