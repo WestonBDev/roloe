@@ -111,7 +111,7 @@ export function elasticStore({ esUrl, esUser, esPassword, esApiKey, esIndex, fet
       }
       info.semantic = Boolean(info.inference_id);
       // Probe once: can this credential mint a scoped key? Then describe() is honest from startup.
-      if (info.scope.startsWith('document-level')) {
+      if (info.scope.startsWith('document-level') && esApiKey) {   // password auth fails closed at mint time instead
         const probe = await es('POST', '/_security/api_key', {
           name: 'roloe-mint-probe', expiration: '1m',
           role_descriptors: { probe: { indices: [{ names: [index], privileges: ['read'], query: { term: { encounter_id: 'probe' } } }] } },
