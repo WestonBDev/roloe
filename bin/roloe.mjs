@@ -35,7 +35,12 @@ const commands = {
       out(`Registered card "${cfg.owner}" at ${url}`);
     }
     if (opt.project) cfg.project = resolve(opt.project);
-    if (opt.url) cfg.url = opt.url;
+    if (opt.url && opt.url.replace(/\/$/, '') !== cfg.url.replace(/\/$/, '')) {
+      // A new coordinator (e.g. the cluster): the old key means nothing there, so register again.
+      const reg = await api({ url: opt.url }, 'POST', '/api/owners', { owner: cfg.owner, name: opt.name || cfg.name, line: opt.line || '' }, { key: '' });
+      Object.assign(cfg, { url: opt.url, key: reg.key });
+      out(`Registered card "${cfg.owner}" at ${opt.url}`);
+    }
     saveConfig(cfg);
     await api(cfg, 'POST', `/api/cards/${cfg.owner}/switch`, { on: true });
     const r = await refreshCard(cfg);
@@ -122,10 +127,42 @@ const commands = {
     out('Save the patch from the page if you want it; press Ctrl-C to close.');
   },
 
+  // The judge beat: a fresh secret written to a file that is never shared, registered so both
+  // gates (this machine's and the coordinator's) will block it if it ever tries to leave.
+  async canary() {
+    const cfg = cfgFor();
+    const { randomInt } = await import('node:crypto');
+    const { mkdirSync, writeFileSync } = await import('node:fs');
+    const { join } = await import('node:path');
+    const { homedir } = await import('node:os');
+    const A = 'ABCDEFGHJKMNPQRSTVWXYZ23456789';
+    const value = 'canary-' + Array.from({ length: 20 }, () => A[randomInt(A.length)]).join('');
+    const dir = join(homedir(), 'roloe-canary');
+    mkdirSync(dir, { recursive: true });
+    const file = join(dir, `canary-${Date.now()}.txt`);
+    writeFileSync(file, value + '\n', { mode: 0o600 });
+    await api(cfg, 'POST', '/api/canaries', { value });
+    cfg.removed = [...new Set([...(cfg.removed || []), value])];
+    saveConfig(cfg);
+    out(`${value}`);
+    out(`written to ${file} (never shared: outside ${cfg.project})`);
+    out('Registered with the coordinator gate and this machine\'s gate.');
+  },
+
+  async stop() {
+    const cfg = cfgFor();
+    const list = (await api(cfg, 'GET', '/api/me/encounters')).encounters;
+    const e = pos[0] ? list.find((x) => x.id === pos[0]) : list[0];
+    if (!e) throw new Error('No open meeting by that id.');
+    const k = new URL(e.link).searchParams.get('k');
+    const r = await api(cfg, 'POST', `/api/e/${e.id}/stop`, undefined, { key: '' , headers: { 'x-roloe-key': k } });
+    out(`Stopped ${e.id} with ${e.with_name}: key revoked, ${r.deleted} shared copies deleted, a query with the old key returns ${r.query_after_stop}.`);
+  },
+
   async help() {
     out(`roloe on --owner <name> --name "<Name>" --project <dir> [--url <coordinator>]
 roloe off | refresh | show [--all|--json] | private <passage_id> [--undo] | me
-roloe tap <name> | inbox | try [<meeting>] [--project <dir>] | mcp`);
+roloe tap <name> | inbox | try [<meeting>] [--project <dir>] | stop [<meeting>] | canary | mcp`);
   },
 };
 

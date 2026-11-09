@@ -28,10 +28,10 @@ export function saveConfig(cfg) {
   writeFileSync(join(dir, 'current'), cfg.owner, { mode: 0o600 });
 }
 
-export async function api(cfg, method, path, body, { key = cfg.key, timeoutMs = 20000 } = {}) {
+export async function api(cfg, method, path, body, { key = cfg.key, timeoutMs = 20000, headers = {} } = {}) {
   const res = await fetch(cfg.url.replace(/\/$/, '') + path, {
     method,
-    headers: { 'content-type': 'application/json', ...(key ? { authorization: `Bearer ${key}` } : {}) },
+    headers: { 'content-type': 'application/json', ...(key ? { authorization: `Bearer ${key}` } : {}), ...headers },
     body: body === undefined ? undefined : JSON.stringify(body),
     signal: AbortSignal.timeout(timeoutMs),
   });

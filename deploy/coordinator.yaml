@@ -1,0 +1,144 @@
+# Roloe coordinator on Kubernetes. No image registry needed: the pod runs the stock node:22-slim
+# image, and an init container fetches this public repository at a pinned commit (bump it with
+# scripts/pin-deploy.sh, which edits the pod template so the pod rolls; Argo CD syncs it). One replica: encounter state lives in the
+# process and on the /data volume.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: roloe
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: roloe-config
+  namespace: roloe
+data:
+  ROLOE_REPO: https://github.com/WestonBDev/roloe.git
+  ROLOE_ENVIRONMENT: radar-cluster
+  OTEL_SERVICE_NAME: roloe-coordinator
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: roloe-data
+  namespace: roloe
+spec:
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests: { storage: 1Gi }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: roloe-coordinator
+  namespace: roloe
+  labels: { app: roloe-coordinator }
+spec:
+  replicas: 1
+  strategy: { type: Recreate }
+  selector:
+    matchLabels: { app: roloe-coordinator }
+  template:
+    metadata:
+      labels: { app: roloe-coordinator }
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        seccompProfile: { type: RuntimeDefault }
+      initContainers:
+        - name: fetch
+          image: node:22-slim
+          command: ["sh", "-c"]
+          args:
+            - |
+              set -e
+              cd /app
+              node -e "
+                const ref = process.env.ROLOE_REF, repo = process.env.ROLOE_REPO.replace(/\.git$/, '');
+                fetch(repo + '/archive/' + ref + '.tar.gz').then(async r => { if (!r.ok) process.exit(1); require('fs').writeFileSync('/tmp/src.tgz', Buffer.from(await r.arrayBuffer())); });
+              "
+              tar -xzf /tmp/src.tgz --strip-components=1 -C /app
+              HOME=/tmp npm ci --omit=dev --ignore-scripts --no-audit --no-fund
+          env:
+            # The pinned commit lives in the pod template, so bumping it (scripts/pin-deploy.sh) rolls the pod.
+            - { name: ROLOE_REF, value: "7a26285ab0a68cccfe512fcfab6186235a484f77" }
+          envFrom:
+            - configMapRef: { name: roloe-config }
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
+          volumeMounts:
+            - { name: app, mountPath: /app }
+            - { name: tmp, mountPath: /tmp }
+      containers:
+        - name: coordinator
+          image: node:22-slim
+          workingDir: /app
+          command: ["node", "src/coordinator.mjs"]
+          ports:
+            - { name: http, containerPort: 7420 }
+          env:
+            - { name: PORT, value: "7420" }
+            - { name: ROLOE_DATA_DIR, value: /data }
+            - { name: ROLOE_ENV_FILE, value: /nonexistent }
+            # The URL phones use (QR codes point here). In git: Argo CD self-heal reverts manual edits.
+            - { name: ROLOE_PUBLIC_URL, value: "https://roloe.cnh.radarhq.io" }
+            # Behind the cluster's ingress: trust its X-Forwarded-For for the guest rate limit.
+            - { name: ROLOE_TRUST_PROXY, value: "1" }
+          envFrom:
+            - configMapRef: { name: roloe-config }
+            # kubectl -n roloe create secret generic roloe-elastic --from-literal=ELASTIC_URL=... --from-literal=ELASTIC_API_KEY=...
+            - secretRef: { name: roloe-elastic, optional: true }
+            # kubectl -n roloe create secret generic roloe-otel --from-literal=OTEL_EXPORTER_OTLP_ENDPOINT=... --from-literal=DASH0_AUTH_TOKEN=...
+            - secretRef: { name: roloe-otel, optional: true }
+          readinessProbe:
+            httpGet: { path: /healthz, port: http }
+            periodSeconds: 5
+          livenessProbe:
+            httpGet: { path: /healthz, port: http }
+            periodSeconds: 15
+            initialDelaySeconds: 10
+          resources:
+            requests: { cpu: 50m, memory: 96Mi }
+            limits: { memory: 384Mi }
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
+          volumeMounts:
+            - { name: app, mountPath: /app, readOnly: true }
+            - { name: data, mountPath: /data }
+            - { name: tmp, mountPath: /tmp }
+      volumes:
+        - { name: app, emptyDir: {} }
+        - { name: data, persistentVolumeClaim: { claimName: roloe-data } }
+        - { name: tmp, emptyDir: {} }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: roloe-coordinator
+  namespace: roloe
+spec:
+  selector: { app: roloe-coordinator }
+  ports:
+    - { name: http, port: 80, targetPort: http }
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: roloe-coordinator
+  namespace: roloe
+spec:
+  rules:
+    - host: roloe.cnh.radarhq.io
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service: { name: roloe-coordinator, port: { name: http } }

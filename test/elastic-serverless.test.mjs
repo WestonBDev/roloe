@@ -12,7 +12,8 @@ function fakeServerless() {
     const body = opts.body && !String(opts.body).includes('\n{') ? JSON.parse(opts.body) : opts.body;
     calls.push({ method: opts.method, path: u.pathname, auth: opts.headers.authorization, body });
     const reply = (status, json) => new Response(JSON.stringify(json), { status });
-    if (u.pathname === '/_license') return reply(410, { error: { type: 'api_not_available_exception' } });
+    // Real Serverless answers /_license too (Gitar): the build flavor must be checked first.
+    if (u.pathname === '/_license') return reply(200, { license: { type: 'basic', status: 'active' } });
     if (u.pathname === '/' ) return reply(200, { version: { build_flavor: 'serverless' } });
     if (u.pathname === '/_inference/_all') return reply(200, { endpoints: [{ inference_id: '.elser-2-elastic' }] });
     if (opts.method === 'HEAD') return reply(404, {});
@@ -33,8 +34,11 @@ test('serverless: API-key auth, semantic + RRF on, scope falls back to the coord
   assert.equal(d.license, 'serverless');
   assert.equal(d.rrf, 'elasticsearch');
   assert.equal(d.semantic, true);
+  assert.match(d.scope, /coordinator filter/, 'honest from startup, before any tap');
   assert.ok(calls.every((c) => c.auth === 'ApiKey main-key'));
-  const mapping = calls.find((c) => c.method === 'PUT').body.mappings.properties;
+  const put = calls.find((c) => c.method === 'PUT').body;
+  assert.equal(put.settings, undefined, 'Serverless refuses shard and replica settings');
+  const mapping = put.mappings.properties;
   assert.equal(mapping.text_semantic.type, 'semantic_text');
 
   const k = await store.createEncounterKey('e-1');
