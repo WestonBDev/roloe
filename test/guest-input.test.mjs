@@ -79,3 +79,15 @@ test('never fetches private or local addresses, and a failed fetch is reported, 
   assert.equal(down.passages.length, 0);
   assert.ok(down.error);
 });
+
+test('a monorepo subfolder is fetched by walking the tree path, never the whole repo (large monorepos)', async () => {
+  const f = fakeFetch([
+    [/git\/trees\/main$/, { tree: [{ path: 'packages', type: 'tree', sha: 'shaPk' }, { path: 'README.md', type: 'blob', sha: 'r' }] }, 'application/json'],
+    [/git\/trees\/shaPk$/, { tree: [{ path: 'api', type: 'tree', sha: 'shaApi' }, { path: 'web', type: 'tree', sha: 'shaWeb' }] }, 'application/json'],
+    [/git\/trees\/shaApi\?recursive=1$/, { tree: [{ path: 'src/index.js', type: 'blob', size: 80 }] }, 'application/json'],
+    [/packages\/api\/src\/index\.js$/, 'export const handler = async () => retryWithBackoff();\n'],
+  ]);
+  const r = await readGuestInput({ link: 'https://github.com/acme/huge/tree/main/packages/api' }, { fetchImpl: f, lookup: publicDns });
+  assert.deepEqual(r.passages.map((p) => p.source), ['packages/api/src/index.js']);
+  assert.ok(!f.calls.some((u) => /git\/trees\/main\?recursive/.test(u)), 'never the whole repo tree');
+});
