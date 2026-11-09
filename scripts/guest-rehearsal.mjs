@@ -23,7 +23,7 @@ const CASES = [
 const json = async (path, init) => { const r = await fetch(base + path, init); return { status: r.status, body: await r.json().catch(() => ({})) }; };
 
 function startAssistant() {
-  const mcp = JSON.stringify({ mcpServers: { roloe: { command: 'node', args: [BIN, 'mcp'], env: { ROLOE_HOME: opt['roloe-home'], ROLOE_REFRESH_MS: '0', ROLOE_CHANNEL_POLL_MS: '600000' } } } });
+  const mcp = JSON.stringify({ mcpServers: { roloe: { command: 'node', args: [BIN, 'mcp'], env: { ROLOE_HOME: opt['roloe-home'], ROLOE_REFRESH_MS: '0', ROLOE_CHANNEL_POLL_MS: '600000', ROLOE_GUEST_TRY: 'off' } } } });
   const env = { HOME: process.env.HOME, USER: process.env.USER, PATH: process.env.PATH, TERM: 'xterm', LANG: 'en_US.UTF-8' };
   const p = spawn('claude', ['-p', 'Call roloe_wait_for_tap once, follow the instructions it returns, post your findings, then stop.', '--model', opt.model || 'sonnet', '--strict-mcp-config', '--mcp-config', mcp,
     '--allowedTools', 'mcp__roloe__roloe_wait_for_tap,mcp__roloe__roloe_pull,mcp__roloe__roloe_search_mine,mcp__roloe__roloe_post_findings'], { env, stdio: ['ignore', 'pipe', 'pipe'] });
