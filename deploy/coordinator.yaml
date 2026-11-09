@@ -1,6 +1,7 @@
 # Roloe coordinator on Kubernetes. No image registry needed: the pod runs the stock node:22-slim
-# image, and an init container fetches this public repository at a pinned ref.
-# One replica: encounter state lives in the process (and /data).
+# image, and an init container fetches this public repository at a pinned commit (bump it with
+# scripts/pin-deploy.sh; Argo CD syncs the change). One replica: encounter state lives in the
+# process and on the /data volume.
 apiVersion: v1
 kind: Namespace
 metadata:
@@ -13,11 +14,21 @@ metadata:
   namespace: roloe
 data:
   ROLOE_REPO: https://github.com/WestonBDev/roloe.git
-  ROLOE_REF: main
-  # The URL phones use. Set it to the cluster's public address, or QR codes point at localhost.
-  ROLOE_PUBLIC_URL: http://localhost:7420
+  ROLOE_REF: "7a26285ab0a68cccfe512fcfab6186235a484f77"
+  # The URL phones use (QR codes point here). Kept in git: Argo CD self-heal reverts manual edits.
+  ROLOE_PUBLIC_URL: https://roloe.cnh.radarhq.io
   ROLOE_ENVIRONMENT: radar-cluster
   OTEL_SERVICE_NAME: roloe-coordinator
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: roloe-data
+  namespace: roloe
+spec:
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests: { storage: 1Gi }
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -100,7 +111,7 @@ spec:
             - { name: tmp, mountPath: /tmp }
       volumes:
         - { name: app, emptyDir: {} }
-        - { name: data, emptyDir: {} }
+        - { name: data, persistentVolumeClaim: { claimName: roloe-data } }
         - { name: tmp, emptyDir: {} }
 ---
 apiVersion: v1
@@ -112,3 +123,18 @@ spec:
   selector: { app: roloe-coordinator }
   ports:
     - { name: http, port: 80, targetPort: http }
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: roloe-coordinator
+  namespace: roloe
+spec:
+  rules:
+    - host: roloe.cnh.radarhq.io
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service: { name: roloe-coordinator, port: { name: http } }

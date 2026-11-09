@@ -104,10 +104,10 @@ node bin/roloe.mjs canary               # the judge beat: a fresh secret in a fi
 
 ```bash
 kubectl apply -n argocd -f deploy/argocd-application.yaml
-kubectl -n roloe create secret generic roloe-elastic --from-literal=ELASTIC_URL=... --from-literal=ELASTIC_API_KEY=...
-kubectl -n roloe create secret generic roloe-otel --from-literal=OTEL_EXPORTER_OTLP_ENDPOINT=... --from-literal=DASH0_AUTH_TOKEN=...
-kubectl -n roloe edit configmap roloe-config     # ROLOE_PUBLIC_URL
+scripts/k8s-secrets.sh            # creates the roloe-elastic and roloe-otel Secrets from your .env; values never enter git
 ```
+
+`ROLOE_PUBLIC_URL` (where QR codes point) and the pinned commit (`ROLOE_REF`) live in `deploy/coordinator.yaml`; change them in git and Argo CD syncs. `scripts/pin-deploy.sh` pins the current `main`.
 
 ### Tests
 
@@ -143,7 +143,7 @@ set -a; . ~/roloe-elastic/es.env; set +a; npm test  # also runs the store contra
 
 - **Already-read passages can't be recalled.** Stop deletes the encounter's copies and revokes its key; it can't recall what an assistant already read, which may remain in that person's session history and with their model provider.
 - **Scope on unlicensed clusters.** On an Elasticsearch Basic license, document-level security is refused, and on Elastic Cloud Serverless keys with privileges can't be minted from an API key. In both cases the coordinator's `encounter_id` filter (applied on every read in every mode) carries scope, and the stage says which mode is live.
-- **The coordinator holds encounter keys in memory.** A restart keeps cards and records but ends open encounters' reads.
+- **One replica.** The coordinator holds encounter keys in memory and its records on one volume, so it runs as a single replica; a restart keeps cards and records but ends open encounters' reads. Scaling out needs that state moved into Elasticsearch.
 - **The Claude Code channel is a research preview** (`--dangerously-load-development-channels`); without it, the assistant waits on `roloe_wait_for_tap` like Codex.
 - **Mobile assistant connectors are untested.** Guests use the browser page.
 - **Quotes from code.** When a giver's best passage is code, the quote is code (shown in mono), not their typed words; the label says whose words it is.
