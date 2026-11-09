@@ -58,12 +58,12 @@ test('guest Try it: job → literal diff on the phone → guest approves → giv
 test('guest Try it is honest: no tests means "no tests to run", never green; only the giver reports, only the guest approves', async () => {
   const s = await startTestServer();
   try {
-    const { wes, aiden } = await twoCards(s);
+    const { wes, maya } = await twoCards(s);
     const m = await guestRepoMeeting(s);
     const { g, call } = m;
     await call('POST', `/api/e/${g.id}/findings`, { findings: [{ cites: 'p-e00001', quote: 'card watcher records refresh as done', about: 'p-b00001', what: 'w', change: { edits: [{ file: 'pkg/retry.js', find: 'fn()', replace: 'x' }] } }] }, wes);
     const f = (await call('GET', '/api/me/try-jobs', null, wes)).body.jobs[0].finding;
-    assert.equal((await call('POST', `/api/e/${g.id}/guest-try`, { finding: f, state: 'passed', passed: 1 }, aiden)).status, 403, 'not their meeting');
+    assert.equal((await call('POST', `/api/e/${g.id}/guest-try`, { finding: f, state: 'passed', passed: 1 }, maya)).status, 403, 'not their meeting');
     assert.equal((await call('POST', `/api/e/${g.id}/guest-try`, { finding: f, state: 'passed', passed: 1 }, wes)).status, 409, 'nothing approved yet: can\'t be green');
     await call('POST', `/api/e/${g.id}/guest-try`, { finding: f, state: 'preparing' }, wes);
     await call('POST', `/api/e/${g.id}/guest-try`, { finding: f, state: 'no-tests', diff: 'diff --git a/x b/x\n' }, wes);
@@ -150,7 +150,7 @@ test('guest Try it hardening: runs only the diff the guest approved, cleans up a
     // 2. Declined: the next pass removes the clone.
     await call('POST', `/api/e/${g.id}/try-approve?k=${g.key}`, { finding: f2.id, decline: true });
     await runGuestTryOnce(cfg, { clone });
-    const left = readdirSync(join(homedir(), '.cache', 'roloe')).filter((d) => d.startsWith(`guest-${g.id}`));
+    const left = readdirSync(join(homedir(), '.cache', 'roloe')).filter((d) => d.includes(g.id));
     assert.deepEqual(left, [], 'no clone left behind');
     // 3. After Stop, reports are refused.
     await call('POST', `/api/e/${g.id}/stop?k=${g.key}`);

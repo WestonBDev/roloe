@@ -27,8 +27,11 @@ export async function gitClone(job, dest) {
   if (job.path) await run('git', ['-C', dest, 'sparse-checkout', 'set', '--no-cone', `/${job.path}`, '/package.json', '/package-lock.json', '/pyproject.toml', '/requirements.txt'], { env, timeout: 60000 });
 }
 
-async function prepare(job, clone) {
-  const dir = join(homedir(), '.cache', 'roloe', `guest-${job.encounter_id}-${job.finding}`);
+// Clone folders carry the owner, so a runner only ever cleans up its own owner's clones.
+const dirName = (owner, j) => `guest-${owner}-${j.encounter_id}-${j.finding}`;
+
+async function prepare(job, clone, owner) {
+  const dir = join(homedir(), '.cache', 'roloe', dirName(owner, job));
   rmSync(dir, { recursive: true, force: true });
   mkdirSync(join(dir, '..'), { recursive: true });
   await clone(job, dir);
@@ -56,8 +59,9 @@ export function makeRunner() {
     for (const [k, p] of prepared) if (!live.has(k) && !running.has(k)) { rmSync(p.dir, { recursive: true, force: true }); prepared.delete(k); }
     // Also clones on disk that no live job owns (left by a runner that restarted).
     const cache = join(homedir(), '.cache', 'roloe');
-    const liveDirs = new Set(jobs.map((j) => `guest-${j.encounter_id}-${j.finding}`));
-    if (existsSync(cache)) for (const d of readdirSync(cache)) if (/^guest-e-[0-9a-f]{10}-f-[0-9a-f]{8}(-cache)?$/.test(d) && !liveDirs.has(d.replace(/-cache$/, ''))) rmSync(join(cache, d), { recursive: true, force: true });
+    const liveDirs = new Set(jobs.map((j) => dirName(cfg.owner, j)));
+    const mine = new RegExp(`^guest-${cfg.owner}-e-[0-9a-f]{10}-f-[0-9a-f]{8}(-cache)?$`);
+    if (existsSync(cache)) for (const d of readdirSync(cache)) if (mine.test(d) && !liveDirs.has(d.replace(/-cache$/, ''))) rmSync(join(cache, d), { recursive: true, force: true });
 
     for (const job of jobs) {
       const k = keyOf(job);
@@ -66,7 +70,7 @@ export function makeRunner() {
       try {
         if (job.state === 'diff-pending') {
           if (!(await post(job, { state: 'preparing' }))) continue;   // another runner claimed it
-          const p = await safePrepare(job, clone);
+          const p = await safePrepare(job, clone, cfg.owner);
           // Show the whole diff or nothing: a truncated diff is not the literal change.
           if (p.diff && p.diff.length > maxDiff) Object.assign(p, { state: 'did-not-apply', reason: 'This change is too large to show on a phone, so it is offered as advice only.', diff: '' });
           await post(job, { state: p.state, diff: p.diff, reason: p.reason, test_command: p.test_command });
@@ -77,7 +81,7 @@ export function makeRunner() {
         if (!(await post(job, { state: 'installing' }))) continue;
         let p = prepared.get(k);
         if (!p) {
-          p = await safePrepare(job, clone);
+          p = await safePrepare(job, clone, cfg.owner);
           if (p.state !== 'review') { await post(job, { state: 'failed', reason: p.reason || 'Could not prepare the change again.' }); if (p.dir) rmSync(p.dir, { recursive: true, force: true }); continue; }
         }
         if (job.approved_diff != null && p.diff !== job.approved_diff) {
@@ -111,8 +115,8 @@ export function makeRunner() {
   };
 }
 
-async function safePrepare(job, clone) {
-  try { return await prepare(job, clone); } catch (e) {
+async function safePrepare(job, clone, owner) {
+  try { return await prepare(job, clone, owner); } catch (e) {
     console.error('[roloe] guest try prepare failed:', e.code || e.name, String(e.stderr || e.message || '').slice(0, 200));
     return { state: 'did-not-apply', reason: e.code === 'bad_repo' ? 'Only public GitHub repos can be tried.' : 'Could not fetch the repo to try the change just now.', diff: '' };
   }

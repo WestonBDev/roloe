@@ -32,7 +32,7 @@ export async function startTestServer() {
   return { keys: {}, base, call, close: () => new Promise((r) => server.close(r)), dataDir: process.env.ROLOE_DATA_DIR, store, state: () => state };
 }
 
-// Two registered, sharing cards with a known overlap (Aiden's retry lesson, Wes's watcher bug).
+// Two registered, sharing cards with a known overlap (Maya's retry lesson, Wes's watcher bug).
 const P = (id, text, kind = 'session') => ({ passage_id: id, kind, speaker: kind === 'file' ? '' : 'owner', source: 's', locator: id, ts: new Date().toISOString(), text });
 
 export async function twoCards(s) {
@@ -45,8 +45,8 @@ export async function twoCards(s) {
     return auth;
   };
   const wes = await reg('wes', 'Wes', [P('p-e00001', 'card watcher records refresh as done before the push succeeds'), P('p-e00002', 'function refresh() { push(card); markDone(); }', 'file')]);
-  const aiden = await reg('aiden', 'Aiden', [P('p-a00001', 'mark the combined total partial when one fetch fails to load, then retry the push'), P('p-a00002', 'pick a theme')]);
-  return { wes, aiden };
+  const maya = await reg('maya', 'Maya', [P('p-a00001', 'mark the combined total partial when one fetch fails to load, then retry the push'), P('p-a00002', 'pick a theme')]);
+  return { wes, maya };
 }
 
 
