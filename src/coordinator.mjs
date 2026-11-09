@@ -4,7 +4,7 @@ import http from 'node:http';
 import { fileURLToPath } from 'node:url';
 import { config } from './env.mjs';
 import { router, send, readJson, bearer, HttpError } from './http.mjs';
-import { state, load, save, sha256, newKey, sameHash, cleanOwnerId, cleanName, cleanLine } from './state.mjs';
+import { state, load, save, saveNow, sha256, newKey, sameHash, cleanOwnerId, cleanName, cleanLine } from './state.mjs';
 import { otlpOn, traceFile, flush } from './telemetry.mjs';
 import { scrub } from './scrub.mjs';
 import { openStore } from './store/index.mjs';
@@ -144,7 +144,8 @@ export async function start(port = config.port) {
     console.log(`[roloe] coordinator on ${config.publicUrl} (port ${port})`);
     console.log(`[roloe] traces → ${traceFile}${otlpOn ? ' and OTLP' : ' (OTLP off: set OTEL_EXPORTER_OTLP_ENDPOINT)'}`);
   });
-  const stop = async () => { await flush().catch(() => {}); process.exit(0); };
+  // Write any pending state before exiting: a key already sent to a caller must survive.
+  const stop = async () => { try { saveNow(); } catch { /* disk gone: nothing more to do */ } await flush().catch(() => {}); process.exit(0); };
   process.on('SIGTERM', stop);
   process.on('SIGINT', stop);
   return server;
