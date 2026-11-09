@@ -53,3 +53,17 @@ test('a guest meeting leaves started, input-read and stopped logs on its trace, 
     assert.ok(!JSON.stringify(mine).includes('watcher'), 'no guest words in any log');
   } finally { await s.close(); }
 });
+
+test('the canary scan covers the log file too, not only traces (Gitar)', async () => {
+  const { startTestServer, twoCards } = await import('./helpers.mjs');
+  const { appendFileSync } = await import('node:fs');
+  const s = await startTestServer();
+  try {
+    const { wes } = await twoCards(s);
+    const canary = 'canary-LOGSCANQX7TZ2M9WK4R';
+    await s.call('POST', '/api/canaries', { value: canary }, wes);
+    assert.equal((await s.call('GET', '/api/dashboard')).body.canaries_in_telemetry, 0);
+    appendFileSync(logFile, JSON.stringify({ body: 'meeting.failed', attributes: { 'error.type': canary } }) + '\n');   // a future leak
+    assert.equal((await s.call('GET', '/api/dashboard')).body.canaries_in_telemetry, 1);
+  } finally { await s.close(); }
+});
