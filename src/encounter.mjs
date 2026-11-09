@@ -56,7 +56,8 @@ async function buildEncounter(store, enc, ref, a, b, guest, guestPassages) {
 
   await step('roloe.tap', ref, { 'roloe.side_a': hmac(id, a.owner), 'roloe.side_b': hmac(id, b.owner) }, async (span) => {
     const owners = [a.owner, b.owner].filter((o) => !o.startsWith('guest-'));
-    const copied = await store.copyCardsToEncounter(id, owners);
+    // A guest's material is written right after this copy; one wait for a refresh covers both.
+    const copied = await store.copyCardsToEncounter(id, owners, { deferRefresh: Boolean(guest && guestPassages.length) });
     const key = await store.createEncounterKey(id);
     enc.keyId = key.id;
     const d = store.describe();
