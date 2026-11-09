@@ -1,6 +1,7 @@
 // OpenTelemetry for the coordinator. One trace per encounter; child spans for each step.
 // Attributes are IDs, counts, sizes and per-encounter HMACs. Never passage text, quotes or diffs.
 import { createHmac, randomBytes } from 'node:crypto';
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { appendFileSync, mkdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { trace, context, SpanStatusCode } from '@opentelemetry/api';
@@ -101,11 +102,15 @@ function parentContext(ref) {
   return context.active();
 }
 
+// The span a step is running in, carried across awaits, so calls made inside it (Elasticsearch)
+// become its children without passing it around.
+const als = new AsyncLocalStorage();
+
 // Run fn inside a child span of the encounter. fn receives the span to add attributes.
 export async function step(name, ref, attrs, fn) {
   const span = tracer.startSpan(name, { attributes: { 'roloe.encounter_id': ref?.encounterId, ...clean(attrs) } }, parentContext(ref));
   try {
-    const out = await fn(span);
+    const out = await als.run({ span }, () => fn(span));
     span.end();
     return out;
   } catch (e) {
@@ -135,3 +140,20 @@ export function requestSpan(method, route) {
 }
 
 export async function flush() { await provider.forceFlush(); }
+
+// A child span of whatever step is running (or a root span if none), for dependency calls.
+export async function childSpan(name, attrs, fn) {
+  const parent = als.getStore()?.span;
+  const ctx = parent ? trace.setSpan(context.active(), parent) : context.active();
+  const span = tracer.startSpan(name, { kind: 2, attributes: clean(attrs) }, ctx);
+  try {
+    const out = await fn(span);
+    span.end();
+    return out;
+  } catch (e) {
+    span.setStatus({ code: SpanStatusCode.ERROR, message: e?.code || e?.name || 'error' });
+    span.setAttribute('error.type', e?.code || e?.name || 'error');
+    span.end();
+    throw e;
+  }
+}
