@@ -17,16 +17,38 @@ Roloe's coordinator **runs no model and never holds anyone's login or token**. E
 
 ## How it works
 
+```mermaid
+flowchart LR
+  tap["Card tap · guest page<br/>QR or NFC → /g/&lt;owner&gt;"]
+  subgraph W["Weston's laptop"]
+    direction TB
+    wa["Claude Code<br/>(own subscription)"] --> wm["Roloe MCP server + CLI<br/>roloe mcp · roloe on<br/>scrub · local egress gate"] --> wt["Try it sandbox<br/>docker --network none, no keys"]
+  end
+  subgraph R["Roloe services"]
+    direction TB
+    co["Roloe coordinator<br/>(no model, no logins)<br/>overlap · citation check · gate"]
+    es["Elasticsearch<br/>(scoped per encounter)"]
+    d0["Dash0 traces<br/>(IDs only, no content)"]
+    co --> es
+    co -.-> d0
+  end
+  subgraph A["Aiden's laptop"]
+    direction TB
+    aa["Codex<br/>(own subscription)"] --> am["Roloe MCP server + CLI<br/>roloe mcp · roloe on<br/>scrub · local egress gate"] --> at["Try it sandbox<br/>docker --network none, no keys"]
+  end
+  tap --> co
+  wm <--> co
+  am <--> co
+  classDef teal fill:#e2efeb,stroke:#0d6e5c,color:#16191d
+  classDef purple fill:#ece7f8,stroke:#5b3fa8,color:#16191d
+  class wa,wm,wt,aa,am,at teal
+  class co,es,d0,tap purple
+  style W fill:#f3faf8,stroke:#0d6e5c
+  style A fill:#f3faf8,stroke:#0d6e5c
+  style R fill:#f7f4fd,stroke:#5b3fa8
 ```
- Weston's laptop                         Coordinator (Kubernetes, Argo CD)                 Aiden's laptop
- ───────────────                         ─────────────────────────────────                 ──────────────
- Claude Code ──MCP stdio── roloe mcp ─┐   pages · encounters · citation check · gate   ┌─ roloe mcp ──MCP stdio── Codex
-   (his login)       local egress gate │   no model · no assistant login                 │ local egress gate   (his login)
- roloe on: index today's sessions,     ├──▶ Elasticsearch: one passage index ◀──────────┤ roloe on: index today's sessions,
-   files, commits → scrub → upload     │      cards copied per encounter, scoped key    │   files, commits → scrub → upload
- roloe try: diff on 127.0.0.1,         │   OpenTelemetry → Dash0: one trace per meeting │
-   Docker --network none               └──────────────────────────────────────────────┘
-```
+
+Teal: each person's own machine and subscription. Purple: Roloe services, no model, no credentials. The same diagram is served at `/how` for a projector.
 
 1. **One switch.** `roloe on` indexes today's work for one project: the owner's own typed messages and the assistant's prose from today's Claude Code and Codex sessions (never tool output, never other sessions' briefs), tracked text files in ~50-line chunks, and the last 25 commits. Everything is scrubbed for secret shapes on the owner's machine and **again** on arrival. `roloe show` (or `/me/<you>`) prints exactly what is shared; anything can be kept private.
 2. **Tap.** Scanning a card's QR opens `/g/<owner>`. With your own card on the phone it offers "Tap as you"; otherwise it's the zero-install guest path. At the tap the coordinator copies both cards into a new encounter in Elasticsearch, mints that encounter's key, and precomputes the overlap both ways (about 40 of the giver's passages as queries against the recipient's, reciprocal rank fusion, top 8 with 3 slots kept for files so a finding can carry a code change).

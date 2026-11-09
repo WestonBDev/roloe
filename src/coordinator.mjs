@@ -122,6 +122,7 @@ export function buildApp({ store }) {
   r.add('GET', '/me/:owner', page('me.html'));
   r.add('GET', '/c/:owner', page('card.html'));
   r.add('GET', '/dashboard', page('dashboard.html'));
+  r.add('GET', '/how', page('how.html'));
   r.add('GET', '/:asset', ({ res, params }) => {
     const type = Object.hasOwn(ASSETS, params.asset) ? ASSETS[params.asset] : null;
     if (!type) throw new HttpError(404, 'not_found', 'Not found');
