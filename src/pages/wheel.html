@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Roloe · your Roloe</title>
+<meta name="robots" content="noindex">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Caveat:wght@500&family=IBM+Plex+Sans:wght@400;600;700&family=JetBrains+Mono:wght@400;600&display=swap">
+<link rel="stylesheet" href="/roloe.css">
+<style>
+  main.wheel { gap: 14px; }
+  .stack { position: relative; perspective: 1100px; touch-action: none; margin-top: 30px; }   /* our swipe, not the page's scroll */
+  .stack .card { position: relative; margin-top: 0; transform-origin: 50% 100%; will-change: transform; }
+  .stack .card.behind { position: absolute; inset: 0 0 auto 0; height: 120px; pointer-events: none; }
+  .stack .card .quote { font-size: 28px; }
+  .stack .card .quote.code { font-size: 15px; line-height: 1.5; }
+  .controls { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+  .controls button { min-width: 64px; font-size: 22px; }
+  .count { font: 600 14px/1 var(--mono); color: var(--pencil); }
+  .empty { text-align: center; }
+  @keyframes dropin { 0% { transform: translateY(-120%) rotate(-3deg); opacity: 0; } 70% { transform: translateY(4%) rotate(.5deg); opacity: 1; } 100% { transform: none; } }
+  .dropin { animation: dropin 650ms cubic-bezier(.2,.9,.25,1.15) backwards; }
+</style>
+</head>
+<body>
+<header class="top"><span class="wordmark">Roloe</span><button id="sound" class="ghost" style="min-height:36px;padding:6px 12px;font-size:14px" aria-pressed="true">Sound on</button></header>
+<main class="wheel">
+  <h1 style="font-size:28px">Your Roloe</h1>
+  <p class="muted" style="font-size:15px">Everyone you met by scanning their card, with what they gave you. Kept only on this phone: no account, nothing stored about you.</p>
+  <section id="stack" class="stack" aria-live="polite" aria-roledescription="card stack"></section>
+  <div class="controls" id="controls" hidden>
+    <button id="prev" class="ghost" aria-label="Previous card">‹</button>
+    <span class="count" id="count"></span>
+    <button id="next" class="ghost" aria-label="Next card">›</button>
+  </div>
+</main>
+<script type="module" src="/wheel.js"></script>
+</body>
+</html>

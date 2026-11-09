@@ -54,7 +54,7 @@ const PAGES_DIR = new URL('./pages/', import.meta.url);
 const ASSETS = { 'roloe.css': 'text/css; charset=utf-8', 'stage.css': 'text/css; charset=utf-8', 'roloe.js': 'text/javascript; charset=utf-8',
   'person.js': 'text/javascript; charset=utf-8', 'guest.js': 'text/javascript; charset=utf-8', 'stage.js': 'text/javascript; charset=utf-8',
   'me.js': 'text/javascript; charset=utf-8', 'dashboard.js': 'text/javascript; charset=utf-8', 'card.js': 'text/javascript; charset=utf-8',
-  'qr.js': 'text/javascript; charset=utf-8' };
+  'qr.js': 'text/javascript; charset=utf-8', 'wheel.js': 'text/javascript; charset=utf-8' };
 const pageCache = new Map();
 const PAGE = (file) => {
   if (process.env.ROLOE_DEV || !pageCache.has(file)) pageCache.set(file, readFileSync(new URL(file, PAGES_DIR), 'utf8'));
@@ -131,6 +131,7 @@ export function buildApp({ store, guestReader = readGuestInput, guestReadTimeout
   r.add('GET', '/dashboard', page('dashboard.html'));
   r.add('GET', '/how', page('how.html'));
   r.add('GET', '/q/:owner', page('qr.html'));
+  r.add('GET', '/r', page('wheel.html'));
   r.add('GET', '/:asset', ({ res, params }) => {
     const type = Object.hasOwn(ASSETS, params.asset) ? ASSETS[params.asset] : null;
     if (!type) throw new HttpError(404, 'not_found', 'Not found');
@@ -292,7 +293,7 @@ export function buildApp({ store, guestReader = readGuestInput, guestReadTimeout
     const key = bearer(req);
     const me = Object.values(state.owners).find((o) => key && sameHash(o.token_hash, sha256(key)));
     if (!me) throw new HttpError(401, 'unauthorized', 'Card key required');
-    me.last_seen = Date.now();   // the owner's assistant is checking in (memory only)
+    if (req.headers['x-roloe-client'] === 'assistant') me.last_seen = Date.now();   // their assistant checking in, not their /me page
     const list = Object.values(state.encounters)
       .filter((e) => (e.a === me.owner || e.b === me.owner) && (query.get('all') || e.status === 'open'))
       .sort((x, y) => y.times.tap - x.times.tap)

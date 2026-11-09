@@ -219,9 +219,22 @@ function showErr(e) {
   el.textContent = e.offline ? 'Offline. Your meeting is safe; this page will catch up when you reconnect.' : e.status === 401 ? 'This link is missing its key. Open the link you were given.' : e.status === 404 ? 'This meeting does not exist (or was never created here).' : e.message;
 }
 
+// File this meeting in this phone's own Roloe (no account; stays on the phone).
+function fileInWheel(v) {
+  const w = store.get('roloe.wheel') || [];
+  if (w.some((e) => e.id === id)) return false;
+  w.push({ id, key, name: v.their_name, at: Date.parse(v.created) || Date.now() });
+  store.set('roloe.wheel', w.slice(-200));
+  return true;
+}
+
 async function refresh() {
   try {
     view = await api(`/api/e/${id}`, { key });
+    // Only the guest's phone files the meeting, never the card owner's.
+    if (view.guest && String(view.me).startsWith('guest-') && fileInWheel(view)) {
+      $('#title').insertAdjacentHTML('afterend', `<p class="muted" style="font-size:14px">Filed in <a href="/r?new=${esc(id)}">your Roloe</a> on this phone.</p>`);
+    }
     if (view.times?.tap) firstSeen = view.times.tap;
     $('#err').hidden = true;
     await maybeReveal(view);
