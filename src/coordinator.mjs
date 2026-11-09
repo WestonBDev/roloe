@@ -437,7 +437,8 @@ export function buildApp({ store }) {
     const result = await step('roloe.stop', ref(enc), {}, async (span) => {
       await store.invalidateKey(enc.keyId);
       const deleted = await store.deleteEncounter(enc.id);
-      const after = await store.count(enc.keyId);
+      // Ask the store itself with the old key (Elasticsearch answers 401 for a revoked key).
+      const after = await store.readsWithRevokedKey(enc.keyId);
       span.setAttributes({ 'roloe.stop.deleted': deleted, 'roloe.stop.query_after_stop': after, 'roloe.stop.by': hmac(enc.id, me) });
       return { deleted, query_after_stop: after };
     });
