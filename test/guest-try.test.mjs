@@ -162,3 +162,14 @@ test('the dependency install runs sandboxed too: no capabilities, no privilege g
   for (const flag of ['--cap-drop', 'ALL', '--security-opt', 'no-new-privileges', '--read-only', '--user']) assert.ok(a.includes(flag), flag);
   assert.ok(!a.includes('--network'), 'the install keeps the network; only the test run drops it');
 });
+
+test('the runner finds git and docker even when started with no PATH (MCP servers get a bare environment)', async () => {
+  const { toolPath } = await import('../src/tryit.mjs');
+  const saved = process.env.PATH;
+  delete process.env.PATH;
+  try {
+    const p = toolPath();
+    assert.match(p, /\/usr\/bin/);
+    assert.match(p, /\/opt\/homebrew\/bin|\/usr\/local\/bin/);
+  } finally { process.env.PATH = saved; }
+});
