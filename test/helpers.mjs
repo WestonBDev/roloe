@@ -29,7 +29,7 @@ export async function startTestServer() {
     let json; try { json = JSON.parse(text); } catch { json = text; }
     return { status: res.status, body: json };
   };
-  return { base, call, close: () => new Promise((r) => server.close(r)), dataDir: process.env.ROLOE_DATA_DIR, store, state: () => state };
+  return { keys: {}, base, call, close: () => new Promise((r) => server.close(r)), dataDir: process.env.ROLOE_DATA_DIR, store, state: () => state };
 }
 
 // Two registered, sharing cards with a known overlap (Aiden's retry lesson, Wes's watcher bug).
@@ -41,6 +41,7 @@ export async function twoCards(s) {
     const auth = { authorization: `Bearer ${key}` };
     await s.call('POST', `/api/cards/${owner}/switch`, { on: true }, auth);
     await s.call('PUT', `/api/cards/${owner}`, { passages }, auth);
+    if (s.keys) s.keys[owner] = auth.authorization.slice(7);
     return auth;
   };
   const wes = await reg('wes', 'Wes', [P('p-e00001', 'card watcher records refresh as done before the push succeeds'), P('p-e00002', 'function refresh() { push(card); markDone(); }', 'file')]);

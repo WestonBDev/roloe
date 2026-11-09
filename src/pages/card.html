@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Roloe · printable card</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Caveat:wght@500&family=Familjen+Grotesk:wght@400;600;700&family=IBM+Plex+Mono:wght@400;600&display=swap">
+<link rel="stylesheet" href="/roloe.css">
+<style>
+  :root { color-scheme: light; --desk: #d9dde0; --stock: #fcfcfa; --ink: #1b1d20; --pencil: #5b6168; --rule: #c6d6e8; --red: #c9392f; }
+  .print { display: flex; flex-wrap: wrap; gap: 20px; justify-content: center; }
+  .pc { width: 85mm; height: 55mm; margin-top: 8mm; padding: 6mm 6mm 7mm; display: flex; flex-direction: column; justify-content: space-between; --pitch: 5mm; }
+  .pc::before { top: 9mm; }
+  .pc .nm { font: 700 6mm/1 var(--sans); }
+  .pc .ln { font: 500 6.4mm/1 var(--hand); }
+  .pc.back { flex-direction: row; align-items: center; gap: 5mm; }
+  .pc.back svg { width: 34mm; height: 34mm; background: #fff; }
+  @media print { body { background: #fff; padding: 0; } header, .hint { display: none; } .pc { box-shadow: none; outline: .2mm solid #ccc; } }
+</style>
+</head>
+<body>
+<header class="top"><span class="wordmark">Roloe</span><span class="hint muted">Print at 100%: 85 × 55 mm</span></header>
+<div class="print">
+  <article class="card pc"><span class="tab" id="tab">Roloe</span><div><p class="nm" id="nm"></p><p class="ln" id="ln"></p></div><span class="wordmark">Roloe</span></article>
+  <article class="card pc back"><span class="tab">Tap a phone here</span><div id="qr"></div><div><p style="font:600 4mm/1.3 var(--sans)">Scan or tap.<br>No app, no account.</p><p class="cite" id="url" style="font-size:3mm;line-height:1.3"></p></div></article>
+</div>
+<script type="module" src="/card.js"></script>
+</body>
+</html>
