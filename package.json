@@ -12,7 +12,7 @@
   },
   "scripts": {
     "start": "node src/coordinator.mjs",
-    "test": "node --test --test-concurrency=1 test/*.test.mjs"
+    "test": "node --test --test-concurrency=1 --test-timeout=60000 --test-force-exit test/*.test.mjs"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "1.32.2",
