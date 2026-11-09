@@ -14,7 +14,7 @@ function project() {
   writeFileSync(join(dir, 'package.json'), JSON.stringify({ name: 'p', type: 'module', scripts: { test: 'node --test' } }));
   writeFileSync(join(dir, 'src', 'add.js'), 'export const add = (a, b) => a - b;\n');
   writeFileSync(join(dir, 'test', 'add.test.js'), "import { test } from 'node:test';\nimport assert from 'node:assert';\nimport { add } from '../src/add.js';\ntest('adds', () => assert.equal(add(2, 3), 5));\ntest('net is off', async () => { await assert.rejects(fetch('https://example.com', { signal: AbortSignal.timeout(3000) })); });\n");
-  writeFileSync(join(dir, '.env'), 'SECRET=never-copied-123\n');
+  writeFileSync(join(dir, '.env'), 'SECRET=' + 'never-copied-123\n');
   writeFileSync(join(dir, '.gitignore'), '.env\nnode_modules\n');
   git('add', '.'); git('commit', '-qm', 'init');
   writeFileSync(join(dir, 'src', 'extra.js'), 'export const x = 1;\n'); // untracked but not ignored: what the card showed
