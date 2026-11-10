@@ -10,4 +10,4 @@ resources:
 images:
   - name: app
     newName: ghcr.io/westonbdev/roloe
-    newTag: "83ed702"
+    newTag: "b367655"
