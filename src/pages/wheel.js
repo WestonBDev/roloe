@@ -103,7 +103,11 @@ if (!wheel.length) {
   rolo.hidden = true;
   $('#empty').innerHTML = '<article class="card empty"><span class="tab">Empty</span><h2>No cards yet.</h2><p>Scan someone\'s Roloe, and they land here.</p></article>';
 } else {
-  faces = wheel.map(() => '<p class="what">Loading card…</p>');
+  // Build once, with every card's words already in place. A card is never rewritten after it is on
+  // the spindle: on a phone that left stale patches over the reading card. A slow or stalled
+  // meeting can't hold the file back: after 2.5 s its card says to open it instead.
+  const soon = (work) => Promise.race([work, new Promise((r) => setTimeout(() => r('<p class="what">Open the card to read it.</p>'), 2500))]);
+  faces = await Promise.all(wheel.map((e) => soon(face(e))));
   build();
   $('#controls').hidden = wheel.length < 2;
   label();
@@ -138,19 +142,6 @@ if (!wheel.length) {
   };
   rolo.addEventListener('pointerup', release);
   rolo.addEventListener('pointercancel', () => { y0 = null; settle(); });
-
-  const showFace = (i, html) => {
-    faces[i] = html;
-    const faceEl = leaves.find((l) => l.i === i)?.el.querySelector('.face');
-    if (faceEl) faceEl.innerHTML = html;
-  };
-  wheel.forEach((entry, i) => {
-    const timeout = setTimeout(() => showFace(i, '<p class="what">Open the card to read it.</p>'), 2500);
-    face(entry).then((html) => {
-      clearTimeout(timeout);
-      showFace(i, html);
-    });
-  });
 }
 
 $('#sound').onclick = () => { soundOn = !soundOn; store.set('roloe.sound', soundOn); $('#sound').textContent = soundOn ? 'Sound on' : 'Sound off'; $('#sound').setAttribute('aria-pressed', String(soundOn)); };
