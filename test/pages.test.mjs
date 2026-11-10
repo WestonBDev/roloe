@@ -94,8 +94,6 @@ test('phone pages: big targets, no leftover status dot, and your Roloe is a rota
     assert.match(html, /prefers-reduced-motion: reduce\) \{ \.leaf \{ transition: none/, 'reduced motion: the file jumps instead of turning');
     assert.match(js, /Promise\.race\(\[work, new Promise/, 'a slow meeting cannot hold the file back: its card gets a fallback line after 2.5 s');
     assert.match(js, /faces = await Promise\.all/, 'the file is built once, with every card already written');
-    assert.match(js, /face\(entry\)\.then\(\(html\) =>/, 'each card face loads without waiting for the other requests');
-    assert.match(js, /faceEl\) faceEl\.innerHTML = html/, 'a card displays its face as soon as its own request finishes');
     assert.doesNotMatch(js, /await Promise\.all\(wheel\.map\(face\)\)/, 'the page does not wait for the slowest card');
     assert.ok(!/\.shade|showFace|faceEl|\.face'\)\.innerHTML/.test(js), 'after its face loads, turning only changes a card\'s angle');
     assert.match(html, /transition: transform 440ms/, 'a turn is a compositor transition, never a repaint per frame');
