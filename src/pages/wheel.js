@@ -50,8 +50,8 @@ async function face(entry) {
   return '<p class="what">Still reading. Open the card to watch.</p>';
 }
 
-// Every card's words are fetched before the file is built, and never touched again: on a phone,
-// changing a card's content or shade after it is on the spindle left stale patches on screen.
+// Draw the file before requests finish. Each face updates as its request resolves (or shows a prompt
+// after 2.5 s), then its result is reused on resize; turns only change card angles.
 let faces = [];
 
 const rolo = $('#rolo');
@@ -103,9 +103,7 @@ if (!wheel.length) {
   rolo.hidden = true;
   $('#empty').innerHTML = '<article class="card empty"><span class="tab">Empty</span><h2>No cards yet.</h2><p>Scan someone\'s Roloe, and they land here.</p></article>';
 } else {
-  // A slow or stalled meeting never holds the file back: after 2.5 s its card says so instead (Gitar).
-  const soon = (work) => Promise.race([work, new Promise((r) => setTimeout(() => r('<p class="what">Open the card to read it.</p>'), 2500))]);
-  faces = await Promise.all(wheel.map((e) => soon(face(e))));
+  faces = wheel.map(() => '<p class="what">Loading card…</p>');
   build();
   $('#controls').hidden = wheel.length < 2;
   label();
@@ -140,6 +138,19 @@ if (!wheel.length) {
   };
   rolo.addEventListener('pointerup', release);
   rolo.addEventListener('pointercancel', () => { y0 = null; settle(); });
+
+  const showFace = (i, html) => {
+    faces[i] = html;
+    const faceEl = leaves.find((l) => l.i === i)?.el.querySelector('.face');
+    if (faceEl) faceEl.innerHTML = html;
+  };
+  wheel.forEach((entry, i) => {
+    const timeout = setTimeout(() => showFace(i, '<p class="what">Open the card to read it.</p>'), 2500);
+    face(entry).then((html) => {
+      clearTimeout(timeout);
+      showFace(i, html);
+    });
+  });
 }
 
 $('#sound').onclick = () => { soundOn = !soundOn; store.set('roloe.sound', soundOn); $('#sound').textContent = soundOn ? 'Sound on' : 'Sound off'; $('#sound').setAttribute('aria-pressed', String(soundOn)); };
