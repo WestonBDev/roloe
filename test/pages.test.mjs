@@ -99,3 +99,13 @@ test('phone pages: big targets, no leftover status dot, and your Roloe is a rota
     assert.match(html, /transition: transform 440ms/, 'a turn is a compositor transition, never a repaint per frame');
   } finally { await s.close(); }
 });
+
+test('the home page gets a visitor started: scan the demo QR with your phone, or open the demo card', async () => {
+  const s = await startTestServer();
+  try {
+    const html = await (await fetch(s.base + '/')).text();
+    assert.match(html, /scan[^<]*phone/i);
+    assert.match(html, /<img[^>]+src="\/api\/cards\/weston\/qr\.svg"/);
+    assert.match(html, /href="\/g\/weston"/);
+  } finally { await s.close(); }
+});
