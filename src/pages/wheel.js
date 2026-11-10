@@ -50,6 +50,10 @@ async function face(entry) {
   return '<p class="what">Still reading. Open the card to watch.</p>';
 }
 
+// Draw the file before requests finish. Each face updates as its request resolves (or shows a prompt
+// after 2.5 s), then its result is reused on resize; turns only change card angles.
+let faces = [];
+
 const rolo = $('#rolo');
 const spin = $('#spin');
 let leaves = [];
@@ -63,24 +67,16 @@ function build() {
     const e = wheel[i];
     const tabLeft = 6 + ((((i % 4) + 4) % 4) * 16);
     html += `<div class="leaf" data-i="${i}"><span class="ltab" style="left:${tabLeft}%">${e ? esc(e.name) : ''}</span>
-      <div class="paper">${e ? `<div class="face" id="face-${i}"></div>` : ''}<i class="shade"></i></div></div>`;
+      <div class="paper${e ? '' : ' blank'}">${e ? `<div class="face">${faces[i] || ''}</div>` : ''}</div></div>`;
   }
   spin.innerHTML = `${html}<div class="hub"></div><div class="knob l"></div><div class="knob r"></div>`;
-  leaves = [...spin.querySelectorAll('.leaf')].map((el) => ({ el, i: Number(el.dataset.i), shade: el.querySelector('.shade') }));
-  wheel.forEach(async (e, i) => { const html2 = await face(e); const el = $(`#face-${i}`); if (el) el.innerHTML = html2; });
+  leaves = [...spin.querySelectorAll('.leaf')].map((el) => ({ el, i: Number(el.dataset.i) }));
 }
 
-// Only two things ever change on a card: its angle and how dark its shade is. Both are animated
-// by the compositor (a CSS transition on transform and on opacity), so a turn never repaints a
-// card. Repainting every card on every frame is what left cards blank mid-turn on a busy phone.
+// Only one thing ever changes on a card: its angle, animated by the compositor (a CSS transition
+// on transform). A turn never repaints a card.
 function paint() {
-  for (const l of leaves) {
-    const d = l.i - p;
-    const a = angleFor(d);
-    l.el.style.transform = `rotateX(${a.toFixed(2)}deg)`;
-    l.shade.style.opacity = (Math.min(1, Math.abs(a - READ) / 110) * 0.5).toFixed(2);
-    l.el.classList.toggle('ahead', d > 0.5);   // a card still to come shows its ruled face, not its words
-  }
+  for (const l of leaves) l.el.style.transform = `rotateX(${angleFor(l.i - p).toFixed(2)}deg)`;
 }
 
 function label() {
@@ -107,6 +103,7 @@ if (!wheel.length) {
   rolo.hidden = true;
   $('#empty').innerHTML = '<article class="card empty"><span class="tab">Empty</span><h2>No cards yet.</h2><p>Scan someone\'s Roloe, and they land here.</p></article>';
 } else {
+  faces = wheel.map(() => '<p class="what">Loading card…</p>');
   build();
   $('#controls').hidden = wheel.length < 2;
   label();
@@ -141,6 +138,19 @@ if (!wheel.length) {
   };
   rolo.addEventListener('pointerup', release);
   rolo.addEventListener('pointercancel', () => { y0 = null; settle(); });
+
+  const showFace = (i, html) => {
+    faces[i] = html;
+    const faceEl = leaves.find((l) => l.i === i)?.el.querySelector('.face');
+    if (faceEl) faceEl.innerHTML = html;
+  };
+  wheel.forEach((entry, i) => {
+    const timeout = setTimeout(() => showFace(i, '<p class="what">Open the card to read it.</p>'), 2500);
+    face(entry).then((html) => {
+      clearTimeout(timeout);
+      showFace(i, html);
+    });
+  });
 }
 
 $('#sound').onclick = () => { soundOn = !soundOn; store.set('roloe.sound', soundOn); $('#sound').textContent = soundOn ? 'Sound on' : 'Sound off'; $('#sound').setAttribute('aria-pressed', String(soundOn)); };
